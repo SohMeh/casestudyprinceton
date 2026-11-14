@@ -325,3 +325,80 @@ def narrative(timeline: dict) -> str:
         for c in timeline["cautions"]:
             lines.append(f"- ({c['level']}) {c['text']} [{c['finding']}]")
     return "\n".join(lines)
+
+
+def report_html(timeline: dict, narrative_md: str, written_by: str = "") -> str:
+    """A printable report: the account in order, then an exhibit list with evidence pointers."""
+    import html
+    import re
+    from zoneinfo import ZoneInfo
+
+    case = timeline["case"]
+    tz = ZoneInfo(timeline["timezone"])
+    esc = html.escape
+
+    def local(iso):
+        return datetime.fromisoformat(iso).astimezone(tz).strftime("%a %d %b %Y, %H:%M:%S") if iso else "no time recorded"
+
+    body = []
+    in_list = False
+    for raw in narrative_md.splitlines():
+        line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", esc(raw))
+        line = re.sub(r"\b(f_[0-9a-f]{12})\b", r'<a href="#\1" class="cite">\1</a>', line)
+        is_li = raw.lstrip().startswith(("- ", "* "))
+        if is_li and not in_list:
+            body.append("<ul>")
+            in_list = True
+        if not is_li and in_list:
+            body.append("</ul>")
+            in_list = False
+        if raw.startswith("# "):
+            continue
+        if raw.startswith("#"):
+            body.append(f"<h2>{line.lstrip('# ')}</h2>")
+        elif is_li:
+            body.append(f"<li>{line.lstrip()[2:]}</li>")
+        elif raw.strip():
+            body.append(f"<p>{line}</p>")
+    if in_list:
+        body.append("</ul>")
+
+    rows = []
+    exhibits = [f for f in timeline["events"] + timeline["undated"] if f["severity"] >= 2]
+    for n, f in enumerate(exhibits, 1):
+        ev = []
+        for e in f["evidence"][:3]:
+            bits = [esc(e["image"]), esc(e["source"])]
+            if e.get("path"):
+                bits.append(esc(e["path"]))
+            if e.get("offset") is not None:
+                bits.append(f"offset {e['offset']:,}" + (f", length {e['length']:,}" if e.get("length") else ""))
+            if e.get("sha256"):
+                bits.append(f"sha-256 {e['sha256']}")
+            ev.append("<div>" + "<br>".join(bits) + "</div>")
+        status = f["review"].get("status", "unreviewed")
+        rows.append(f'<tr id="{f["id"]}"><td>{n}</td><td>{local(f.get("time"))}</td>'
+                    f'<td><b>{esc(f["title"])}</b><br>{esc(f["summary"])}<br><span class="id">{f["id"]} · {esc(f["agent"])} agent'
+                    f' · confidence {round(f["confidence"] * 100)}% · {status}</span></td><td class="ev">{"".join(ev)}</td></tr>')
+    st = timeline["stats"]
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{esc(case['name'])}: case report</title>
+<style>
+body{{font:15px/1.55 Charter,'Iowan Old Style',Georgia,serif;color:#16233a;max-width:1000px;margin:36px auto;padding:0 28px}}
+h1{{font-size:28px;margin:0 0 4px}} h2{{font-size:19px;margin:28px 0 8px;border-bottom:1px solid #d3d8df;padding-bottom:4px}}
+.meta,.id,.ev,th{{font-family:'Avenir Next','Segoe UI',sans-serif}} .meta{{color:#47536a;font-size:13px}}
+li{{margin:0 0 8px}} .cite{{font:11px ui-monospace,Menlo,monospace;color:#7c8799;text-decoration:none}}
+table{{border-collapse:collapse;width:100%;font-size:13px}} th{{text-align:left;font-size:12px;color:#47536a;border-bottom:1px solid #16233a;padding:6px 8px 6px 0}}
+td{{vertical-align:top;border-bottom:1px solid #e6e9ed;padding:8px 8px 8px 0}} .id{{font-size:11px;color:#7c8799}}
+.ev{{font-size:11px;color:#47536a;word-break:break-all;width:34%}} .ev div{{margin-bottom:6px}}
+tr:target td{{background:#fff7d6}} @media print{{body{{margin:0}} a{{color:inherit}}}}
+</style></head><body>
+<h1>{esc(case['name'])}</h1>
+<p class="meta">Case report generated {timeline['built']} UTC. Times are shown in {esc(timeline['timezone'])}.
+{st['findings']} findings from {len(st['agents'])} agents, {st['confirmed']} confirmed and {st['rejected']} rejected by a reviewer.
+{esc(written_by)}</p>
+<p>{esc(case.get('description', ''))}</p>
+{''.join(body)}
+<h2>Exhibits</h2>
+<p class="meta">Every notable finding with the evidence needed to re-derive it from the original image.</p>
+<table><thead><tr><th>No.</th><th>When</th><th>Finding</th><th>Evidence</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+</body></html>"""

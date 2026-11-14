@@ -65,7 +65,8 @@ button:disabled { opacity: .45; cursor: default; }
 
 .evidence li { padding: 7px 0; border-top: 1px solid var(--rule-soft); display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
 .evidence li:first-child { border-top: 0; }
-.evidence .name { font-weight: 600; }
+.evidence .name { font-weight: 600; display: flex; gap: 7px; align-items: baseline; }
+.evidence input { margin: 0; accent-color: var(--ink); }
 .evidence .sub { grid-column: 1 / -1; color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evidence .state { font-size: 12px; color: var(--ink-2); }
 .evidence .missing { color: var(--lane-coverup); }

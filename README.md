@@ -42,6 +42,8 @@ The design rule is simple: **the model proposes and explains, the tools compute,
 - **Replay** steps through the case one moment at a time with a plain-language caption.
 - **Follow this file** draws one document's path across devices, under every name it carried.
 - Click anything to see the evidence behind it, download the recovered file, and confirm or reject the finding.
+- **Open report** gives a printable account with an exhibit list: every notable finding with its image, offset and hash.
+- Tick evidence items to send agents to specific devices only.
 - **3D view** puts device across, activity up and time in depth, with quiet gaps folded so the camera flies from burst to burst.
 
 ![Replay mode](docs/replay.png)
@@ -97,6 +99,8 @@ In the app choose "NIST CFReDS: Data Leakage Case" and press "Send all agents". 
 - **Usefulness.** Case tracking, agent dispatch, human review of every finding, recovered files one click away, a printable narrative with citations.
 - **Visualization and demo.** Interactive timeline, file threads, replay, 3D view.
 - **Responsible compute.** The forensic work uses no model at all. The LLM only plans and writes, over a few kilobytes of ledger JSON.
+
+A two-minute demo script is in [docs/DEMO.md](docs/DEMO.md).
 
 ## Layout
 

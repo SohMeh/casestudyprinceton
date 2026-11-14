@@ -357,62 +357,90 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             n += 1
         return n
 
+    def usn_records():
+        """Yield (segment, time, reason, name, full_path_getter) for rename and delete records.
+
+        Reads the journal directly and resolves a full path only when asked,
+        which is far faster than resolving every record.
+        """
+        try:
+            from dissect.ntfs.util import segment_reference
+            seen_fs = False
+            for fs in t.filesystems:
+                if getattr(fs, "__type__", "") != "ntfs" or not getattr(fs.ntfs, "usnjrnl", None):
+                    continue
+                seen_fs = True
+                for rec in fs.ntfs.usnjrnl.records():
+                    reason = str(rec.Reason).upper()
+                    usn_total[0] += 1
+                    if "RENAME" not in reason and "FILE_DELETE" not in reason:
+                        continue
+                    try:
+                        ts = rec.timestamp
+                    except Exception:
+                        continue
+                    ref = rec.record.FileReferenceNumber
+                    seg = f"{segment_reference(ref)}#{ref.SequenceNumber}"
+                    yield seg, ts, reason, rec.filename or "", (lambda r=rec: _s(r.full_path))
+            if seen_fs:
+                return
+        except Exception as exc:
+            c.log(f"{image.label}: direct journal read failed ({exc}), using the slower reader")
+        for r in t.usnjrnl():
+            usn_total[0] += 1
+            reason = _s(_get(r, "reason")).upper()
+            ts = _get(r, "ts")
+            if not ts or ("RENAME" not in reason and "FILE_DELETE" not in reason):
+                continue
+            path = _s(_get(r, "path"))
+            yield _s(_get(r, "segment_id")), ts, reason, _name(path), (lambda p=path: p)
+
+    usn_total = [0]
+
     def usn() -> int:
         """Renames that change the extension, and the overwrite pattern of secure erasers."""
         n = 0
         pending: dict[str, tuple[str, Any]] = {}
-        renames: dict[str, list[tuple[Any, str]]] = defaultdict(list)
+        renames: dict[str, list[tuple[Any, str, str, Any]]] = defaultdict(list)   # ts, old, new, path getter
         deleted_at: dict[str, Any] = {}
-        total = 0
-        for r in t.usnjrnl():
-            total += 1
-            reason = _s(_get(r, "reason")).upper()
-            seg = _s(_get(r, "segment_id"))
-            path = _s(_get(r, "path"))
-            ts = _get(r, "ts")
+        for seg, ts, reason, name, get_path in usn_records():
             if "RENAME_OLD_NAME" in reason:
-                pending[seg] = (path, ts)
+                pending[seg] = (name, get_path)
             elif "RENAME_NEW_NAME" in reason and seg in pending:
-                old, _ = pending.pop(seg)
-                if "CLOSE" in reason and renames[seg] and renames[seg][-1][1] == f"{old}\x00{path}":
-                    continue
-                renames[seg].append((ts, f"{old}\x00{path}"))
+                old, old_path = pending.pop(seg)
+                renames[seg].append((ts, old, name, get_path, old_path))
             elif "FILE_DELETE" in reason:
                 deleted_at[seg] = ts
         for seg, items in renames.items():
-            uniq = []
-            for ts, pair in items:
-                if not uniq or uniq[-1][1] != pair:
-                    uniq.append((ts, pair))
-            first_old = uniq[0][1].split("\x00")[0]
-            span = (uniq[-1][0] - uniq[0][0]) if len(uniq) > 1 else timedelta(0)
+            first_old = items[0][1]
+            span = items[-1][0] - items[0][0]
             dele = deleted_at.get(seg)
-            if len(uniq) >= 3 and span <= timedelta(minutes=3) and dele and dele - uniq[-1][0] <= timedelta(minutes=3):
-                nm = _name(first_old)
-                c.add("file_wiped", f"{nm} was overwritten and deleted",
-                      f"{first_old} was renamed {len(uniq)} times to meaningless names within "
+            if len(items) >= 3 and span <= timedelta(minutes=3) and dele and dele - items[-1][0] <= timedelta(minutes=3):
+                where = items[0][4]().replace("/", "\\")
+                c.add("file_wiped", f"{first_old} was overwritten and deleted",
+                      f"{where or first_old} was renamed {len(items)} times to meaningless names within "
                       f"{int(span.total_seconds())} seconds and then deleted. Secure erasers do this to hide "
                       "the file name after overwriting the content.",
-                      to_iso(uniq[0][0]), "NTFS change journal record time", "$UsnJrnl:$J",
-                      path=first_old, detail=" > ".join(_name(p.split("\x00")[1]) for _, p in uniq[:8]),
+                      to_iso(items[0][0]), "NTFS change journal record time", "$UsnJrnl:$J",
+                      path=where or first_old, detail=" > ".join(x[2] for x in items[:8]),
                       severity=3, tags=["wiped", "anti-forensics"], time_end=to_iso(dele),
-                      data={"name": nm, "path": first_old, "renames": len(uniq)})
+                      data={"name": first_old, "path": where, "renames": len(items)})
                 n += 1
                 continue
-            for ts, pair in uniq:
-                old, new = pair.split("\x00")
-                on, nn = _name(old), _name(new)
-                eo, en = extension_of(on), extension_of(nn)
+            for ts, old, new, get_path, _ in items:
+                eo, en = extension_of(old), extension_of(new)
                 if eo == en or not (eo in OFFICE_EXT or en in OFFICE_EXT):
                     c.dropped["ordinary renames"] += 1
                     continue
-                c.add("file_renamed", f"Renamed {on} to {nn}",
-                      f"{old} was renamed to {nn}. The extension changed from .{eo or '(none)'} to .{en or '(none)'}.",
-                      to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=new, detail=f"was {old}",
+                where = get_path().replace("/", "\\")
+                c.add("file_renamed", f"Renamed {old} to {new}",
+                      f"{old} was renamed to {new} in {where.rsplit(chr(92), 1)[0] or 'its folder'}. "
+                      f"The extension changed from .{eo or '(none)'} to .{en or '(none)'}.",
+                      to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=where, detail=f"was {old}",
                       severity=3 if eo in OFFICE_EXT else 2, tags=["rename", "extension-change"],
-                      data={"old_name": on, "new_name": nn, "old_path": old, "new_path": new, "name": nn})
+                      data={"old_name": old, "new_name": new, "new_path": where, "name": new})
                 n += 1
-        c.log(f"{image.label}: change journal: read {total} records")
+        c.log(f"{image.label}: change journal: read {usn_total[0]} records")
         return n
 
     _section(c, "system and accounts", system)

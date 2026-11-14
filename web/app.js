@@ -19,7 +19,7 @@ const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const S = { meta: null, cases: [], caseId: null, tl: null, mode: "lane", sev: 1, q: "", hidden: new Set(),
   showRef: false, sel: null, journey: null, beat: -1, playing: false, timer: null, logNext: 0, running: null,
-  tab: "files", tasks: [], lastReload: 0, view3d: false };
+  tab: "files", tasks: [], lastReload: 0, view3d: false, skip: new Set() };
 let wall = (iso) => new Date(iso);
 let chart = null;
 
@@ -66,7 +66,7 @@ async function boot() {
 
 async function openCase(id) {
   stopPlay();
-  Object.assign(S, { caseId: id, sel: null, journey: null, beat: -1, logNext: 0, hidden: new Set(), q: "" });
+  Object.assign(S, { caseId: id, sel: null, journey: null, beat: -1, logNext: 0, hidden: new Set(), q: "", skip: new Set() });
   $("#search").value = "";
   $("#log").innerHTML = "";
   history.replaceState(null, "", `?case=${encodeURIComponent(id)}`);
@@ -102,7 +102,7 @@ function renderBar() {
   $("#caseMeta").innerHTML = `${c.synthetic ? '<span class="tag">synthetic practice data</span> ' : ""}` +
     `<b>${st.findings}</b> findings &nbsp; <b>${st.recovered}</b> files recovered &nbsp; <b>${st.disguised}</b> false names &nbsp; ` +
     `<b>${st.coverup}</b> cover-up traces &nbsp; times shown in ${h(c.timezone)}`;
-  $("#reportLink").href = `/api/cases/${S.caseId}/report`;
+  $("#reportLink").href = `/api/cases/${S.caseId}/report?format=html`;
 }
 
 function renderRail() {
@@ -112,7 +112,7 @@ function renderRail() {
     const file = im.path.split(/[\\/]/).pop();
     const hash = im.sha1_expected ? (im.sha1_actual ? (im.sha1_actual.toUpperCase() === im.sha1_expected.toUpperCase() ? "hash verified" : "HASH MISMATCH") : "hash not checked yet") : "";
     const state = im.present ? `${counts.get(im.id) || 0} findings` : '<span class="missing">not on disk</span>';
-    return `<li><span class="name">${h(im.label)}</span><span class="state">${state}</span>
+    return `<li><label class="name"><input type="checkbox" data-image="${h(im.id)}" ${S.skip.has(im.id) || !im.present ? "" : "checked"} ${im.present ? "" : "disabled"} aria-label="Include ${h(im.label)} when sending agents"> ${h(im.label)}</label><span class="state">${state}</span>
       <span class="sub" title="${h(im.path)}">${h(file)}${hash ? " · " + hash : ""}</span></li>`;
   }).join("");
   renderAgents();
@@ -166,7 +166,9 @@ async function poll() {
 }
 
 async function send(agents) {
-  try { await api(`/api/cases/${S.caseId}/dispatch`, { agents }); S.running = "agents"; renderAgents(); poll(); }
+  const images = S.skip.size ? S.tl.case.images.filter((i) => i.present && !S.skip.has(i.id)).map((i) => i.id) : null;
+  if (images && !images.length) { alert("Tick at least one evidence item first."); return; }
+  try { await api(`/api/cases/${S.caseId}/dispatch`, { agents, images }); S.running = "agents"; renderAgents(); poll(); }
   catch (e) { alert(e.message); }
 }
 
@@ -529,6 +531,10 @@ async function renderTab() {
 function bind() {
   $("#caseSelect").addEventListener("change", (e) => openCase(e.target.value));
   $("#sendAll").addEventListener("click", () => send(null));
+  $("#evidence").addEventListener("change", (e) => {
+    const id = e.target.dataset?.image;
+    if (id) e.target.checked ? S.skip.delete(id) : S.skip.add(id);
+  });
   $("#agents").addEventListener("click", (e) => { const a = e.target.dataset?.agent; if (a) send([a]); });
   $("#playBtn").addEventListener("click", togglePlay);
   $("#prevBeat").addEventListener("click", () => { stopPlay(); gotoBeat(S.beat - 1, false); });

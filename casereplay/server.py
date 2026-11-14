@@ -159,11 +159,17 @@ def create_app(store_root: str | Path = "cases") -> FastAPI:
                                         media_type="application/octet-stream")
         raise HTTPException(404, "no recovered file for this finding")
 
-    @app.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
-    def report(case_id: str) -> str:
+    @app.get("/api/cases/{case_id}/report")
+    def report(case_id: str, format: str = "md"):
         case = case_or_404(case_id)
+        tl = consensus.build(case, store)
         p = store.case_dir(case_id) / "report.md"
-        return p.read_text() if p.exists() else consensus.narrative(consensus.build(case, store))
+        text = p.read_text() if p.exists() else consensus.narrative(tl)
+        if format == "html":
+            by = (f"Narrative written by the lead investigator agent ({agents.model_name() or 'LLM'}) and checked "
+                  "against the ledger." if p.exists() else "Narrative assembled from the agreed timeline without a language model.")
+            return HTMLResponse(consensus.report_html(tl, text, by))
+        return PlainTextResponse(text)
 
     @app.post("/api/cases/{case_id}/ask")
     def ask(case_id: str, body: AskBody) -> dict:
