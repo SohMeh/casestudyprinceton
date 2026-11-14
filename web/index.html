@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case Replay</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%2316233a%27/%3E%3Ccircle cx=%275%27 cy=%2710%27 r=%272%27 fill=%27%23eda100%27/%3E%3Ccircle cx=%2711%27 cy=%276%27 r=%272%27 fill=%27%23e34948%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Case Replay</div>
+  <label class="case-pick">
+    <span class="sr">Case</span>
+    <select id="caseSelect" aria-label="Open case"></select>
+  </label>
+  <button id="newCaseBtn" class="quiet">New case</button>
+  <div class="bar-meta" id="caseMeta"></div>
+  <div class="bar-actions">
+    <a id="reportLink" class="quiet btn" target="_blank" rel="noopener">Open report</a>
+    <button id="sendAll" class="primary">Send all agents</button>
+  </div>
+</header>
+
+<main class="desk">
+  <aside class="rail" aria-label="Case management">
+    <section>
+      <h2>Evidence</h2>
+      <ul id="evidence" class="evidence"></ul>
+    </section>
+    <section>
+      <h2>Agents</h2>
+      <ul id="agents" class="agents"></ul>
+      <div id="leadBox" class="lead"></div>
+    </section>
+    <section class="log-wrap">
+      <h2>Activity <span id="runState" class="run-state"></span></h2>
+      <ol id="log" class="log" aria-live="polite"></ol>
+    </section>
+  </aside>
+
+  <section class="stage">
+    <div class="story" id="story">
+      <div class="story-controls">
+        <button id="prevBeat" class="icon" aria-label="Previous event">&#9664;</button>
+        <button id="playBtn" class="primary play">Replay</button>
+        <button id="nextBeat" class="icon" aria-label="Next event">&#9654;</button>
+      </div>
+      <div class="caption" id="caption" aria-live="polite"></div>
+    </div>
+
+    <div class="filters" role="group" aria-label="Timeline filters">
+      <div class="seg" id="modeSeg" role="radiogroup" aria-label="Rows">
+        <button data-mode="lane" class="on" role="radio" aria-checked="true">By activity</button>
+        <button data-mode="device" role="radio" aria-checked="false">By device</button>
+      </div>
+      <div class="seg" id="sevSeg" role="radiogroup" aria-label="Importance">
+        <button data-sev="1" class="on" role="radio" aria-checked="true">Everything</button>
+        <button data-sev="2" role="radio" aria-checked="false">Notable</button>
+        <button data-sev="3" role="radio" aria-checked="false">Key only</button>
+      </div>
+      <input id="search" type="search" placeholder="Filter by file, device or word" aria-label="Filter timeline">
+      <label class="check" id="refToggleWrap" hidden><input type="checkbox" id="refToggle"> Show answer key</label>
+      <span class="spacer"></span>
+      <div class="days" id="days"></div>
+      <button id="fitBtn" class="quiet">Whole case</button>
+      <button id="view3d" class="quiet">3D view</button>
+    </div>
+
+    <div class="chart-wrap" id="chartWrap">
+      <svg id="chart" role="img" aria-label="Case timeline"></svg>
+      <canvas id="chart3d" hidden></canvas>
+      <div id="tip" class="tip" hidden></div>
+      <div id="empty" class="empty" hidden></div>
+    </div>
+    <div class="legend" id="legend"></div>
+
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="files" class="on">Files</button>
+      <button role="tab" data-tab="points">Open points</button>
+      <button role="tab" data-tab="score" id="scoreTab" hidden>Score</button>
+      <button role="tab" data-tab="findings">All findings</button>
+      <button role="tab" data-tab="report">Narrative</button>
+    </div>
+    <div class="tabpane" id="tabpane"></div>
+  </section>
+
+  <aside class="exhibit" id="exhibit" aria-label="Evidence for the selected item"></aside>
+</main>
+
+<dialog id="newCase">
+  <form method="dialog" id="newCaseForm">
+    <h2>New case</h2>
+    <label>Case name <input name="name" required placeholder="Acme leak, March 2026"></label>
+    <label>Time zone of the events <input name="timezone" value="America/New_York" required></label>
+    <label>Evidence images, one per line: id, kind (usb, optical, computer, triage), label, path
+      <textarea name="images" rows="5" placeholder="usb1, usb, Seized USB stick, /evidence/usb1.E01&#10;pc, computer, Suspect laptop, /evidence/laptop.E01"></textarea>
+    </label>
+    <p class="hint">Images are opened read-only. Supported: E01 and raw images; FAT32, exFAT, UDF and NTFS volumes.</p>
+    <div class="row">
+      <button value="cancel" class="quiet" formnovalidate>Cancel</button>
+      <button value="ok" class="primary">Create case</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/vendor/d3.min.js"></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

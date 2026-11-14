@@ -1,0 +1,15 @@
+# Forensic engine (pure Python, read-only access to images)
+dissect.target>=3.20
+olefile>=0.47
+# Agents
+deepagents>=0.7
+langchain>=1.0
+langchain-anthropic>=1.0
+# App
+fastapi>=0.110
+uvicorn>=0.29
+# Practice case generator and tests
+python-docx>=1.1
+python-pptx>=0.6
+openpyxl>=3.1
+pytest>=8

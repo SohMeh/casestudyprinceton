@@ -1,0 +1,9 @@
+# Evidence images and case output never go in the repo
+data/
+cases/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+*.tmp

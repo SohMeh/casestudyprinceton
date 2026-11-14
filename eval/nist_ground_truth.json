@@ -1,0 +1,1014 @@
+{
+ "id": "nist_data_leakage",
+ "name": "NIST CFReDS Data Leakage Case (2015)",
+ "source": "https://cfreds-archive.nist.gov/data_leakage_case/data-leakage-case.html",
+ "answer_key": "https://cfreds-archive.nist.gov/data_leakage_case/leakage-answers.pdf",
+ "note": "Transcribed from the published answer key. Used only to score the agents and to draw the reference overlay. Never given to an agent as input.",
+ "timezone": "America/New_York",
+ "people": [
+  {
+   "name": "Iaman Informant",
+   "role": "suspect, manager of the technology development division",
+   "accounts": [
+    "informant",
+    "iaman.informant@nist.gov"
+   ]
+  },
+  {
+   "name": "Spy Conspirator",
+   "role": "outside contact",
+   "accounts": [
+    "spy.conspirator@nist.gov"
+   ]
+  }
+ ],
+ "devices": {
+  "pc": {
+   "label": "INFORMANT-PC",
+   "os": "Windows 7 Ultimate SP1 x64"
+  },
+  "rm1": {
+   "label": "Authorized USB",
+   "fs": "exFAT",
+   "serial": "4C530012450531101593"
+  },
+  "rm2": {
+   "label": "IAMAN $_@",
+   "fs": "FAT32",
+   "serial": "4C530012550531106501",
+   "formatted": [
+    "2015-03-24T17:01:00",
+    "2015-03-24T17:03:59"
+   ]
+  },
+  "rm3": {
+   "label": "IAMAN CD",
+   "fs": "UDF"
+  }
+ },
+ "rm2_files": [
+  {
+   "path": "\\DESIGN\\winter_storm.amr",
+   "name": "winter_storm.amr",
+   "true_type": "PPT",
+   "size": 14470348
+  },
+  {
+   "path": "\\DESIGN\\winter_whether_advisory.zip",
+   "name": "winter_whether_advisory.zip",
+   "true_type": "PPTX",
+   "size": 16357785
+  },
+  {
+   "path": "\\pricing decision\\my_favorite_cars.db",
+   "name": "my_favorite_cars.db",
+   "true_type": "XLS",
+   "size": 1258291
+  },
+  {
+   "path": "\\pricing decision\\my_favorite_movies.7z",
+   "name": "my_favorite_movies.7z",
+   "true_type": "XLSX",
+   "size": 100044
+  },
+  {
+   "path": "\\pricing decision\\new_years_day.jpg",
+   "name": "new_years_day.jpg",
+   "true_type": "XLSX",
+   "size": 10234101
+  },
+  {
+   "path": "\\pricing decision\\super_bowl.avi",
+   "name": "super_bowl.avi",
+   "true_type": "XLS",
+   "size": 10286530
+  },
+  {
+   "path": "\\PROGRESS\\my_friends.svg",
+   "name": "my_friends.svg",
+   "true_type": "DOC",
+   "size": 58368
+  },
+  {
+   "path": "\\PROGRESS\\my_smartphone.png",
+   "name": "my_smartphone.png",
+   "true_type": "DOCX",
+   "size": 4435476
+  },
+  {
+   "path": "\\PROGRESS\\new_year_calendar.one",
+   "name": "new_year_calendar.one",
+   "true_type": "DOCX",
+   "size": 27340
+  },
+  {
+   "path": "\\PROPOSAL\\a_gift_from_you.gif",
+   "name": "a_gift_from_you.gif",
+   "true_type": "DOCX",
+   "size": 35127296
+  },
+  {
+   "path": "\\PROPOSAL\\landscape.png",
+   "name": "landscape.png",
+   "true_type": "DOCX",
+   "size": 6480199
+  },
+  {
+   "path": "\\technical review\\diary_#1d.txt",
+   "name": "diary_#1d.txt",
+   "true_type": "DOCX",
+   "size": 120832
+  },
+  {
+   "path": "\\technical review\\diary_#1p.txt",
+   "name": "diary_#1p.txt",
+   "true_type": "PPTX",
+   "size": 457728
+  },
+  {
+   "path": "\\technical review\\diary_#2d.txt",
+   "name": "diary_#2d.txt",
+   "true_type": "DOCX",
+   "size": 658432
+  },
+  {
+   "path": "\\technical review\\diary_#2p.txt",
+   "name": "diary_#2p.txt",
+   "true_type": "PPT",
+   "size": 1153433
+  },
+  {
+   "path": "\\technical review\\diary_#3d.txt",
+   "name": "diary_#3d.txt",
+   "true_type": "DOC",
+   "size": 2359296
+  },
+  {
+   "path": "\\technical review\\diary_#3p.txt",
+   "name": "diary_#3p.txt",
+   "true_type": "PPT",
+   "size": 324608
+  }
+ ],
+ "rm3_files": [
+  {
+   "name": "[secret_project]_revised_points.ppt",
+   "true_type": "PPT",
+   "size": 14470348
+  },
+  {
+   "name": "[secret_project]_detailed_design.pptx",
+   "true_type": "PPTX",
+   "size": 16357785
+  },
+  {
+   "name": "[secret_project]_price_analysis_#1.xlsx",
+   "true_type": "XLSX",
+   "size": 100044
+  },
+  {
+   "name": "[secret_project]_price_analysis_#2.xls",
+   "true_type": "XLS",
+   "size": 1258291
+  },
+  {
+   "name": "[secret_project]_market_analysis.xlsx",
+   "true_type": "XLSX",
+   "size": 10234101
+  },
+  {
+   "name": "[secret_project]_market_shares.xls",
+   "true_type": "XLS",
+   "size": 10286530
+  },
+  {
+   "name": "[secret_project]_progress_#1.docx",
+   "true_type": "DOCX",
+   "size": 4435476
+  },
+  {
+   "name": "[secret_project]_progress_#2.docx",
+   "true_type": "DOCX",
+   "size": 27340
+  },
+  {
+   "name": "[secret_project]_progress_#3.doc",
+   "true_type": "DOC",
+   "size": 57344
+  },
+  {
+   "name": "[secret_project]_detailed_proposal.docx",
+   "true_type": "DOCX",
+   "size": null
+  },
+  {
+   "name": "[secret_project]_proposal.docx",
+   "true_type": "DOCX",
+   "size": 6480199
+  },
+  {
+   "name": "[secret_project]_technical_review_#1.docx",
+   "true_type": "DOCX",
+   "size": 120832
+  },
+  {
+   "name": "[secret_project]_technical_review_#1.pptx",
+   "true_type": "PPTX",
+   "size": 457728
+  },
+  {
+   "name": "[secret_project]_technical_review_#2.docx",
+   "true_type": "DOCX",
+   "size": 658432
+  },
+  {
+   "name": "[secret_project]_technical_review_#2.ppt",
+   "true_type": "PPT",
+   "size": 1153433
+  },
+  {
+   "name": "[secret_project]_technical_review_#3.doc",
+   "true_type": "DOC",
+   "size": 2359296
+  },
+  {
+   "name": "[secret_project]_technical_review_#3.ppt",
+   "true_type": "PPT",
+   "size": 324608
+  }
+ ],
+ "renames": [
+  {
+   "time": "2015-03-23T14:41:40",
+   "old": "[secret_project]_detailed_proposal.docx",
+   "new": "landscape.png"
+  },
+  {
+   "time": "2015-03-23T14:41:55",
+   "old": "[secret_project]_design_concept.ppt",
+   "new": "space_and_earth.mp4"
+  },
+  {
+   "time": "2015-03-23T16:30:44",
+   "old": "(secret_project)_pricing_decision.xlsx",
+   "new": "happy_holiday.jpg"
+  },
+  {
+   "time": "2015-03-23T16:31:02",
+   "old": "[secret_project]_final_meeting.pptx",
+   "new": "do_u_wanna_build_a_snow_man.mp3"
+  },
+  {
+   "time": "2015-03-24T09:49:51",
+   "old": "[secret_project]_detailed_design.pptx",
+   "new": "winter_whether_advisory.zip"
+  },
+  {
+   "time": "2015-03-24T09:50:08",
+   "old": "[secret_project]_revised_points.ppt",
+   "new": "winter_storm.amr"
+  },
+  {
+   "time": "2015-03-24T09:50:49",
+   "old": "[secret_project]_design_concept.ppt",
+   "new": "space_and_earth.mp4"
+  },
+  {
+   "time": "2015-03-24T09:52:35",
+   "old": "[secret_project]_final_meeting.pptx",
+   "new": "do_u_wanna_build_a_snow_man.mp3"
+  },
+  {
+   "time": "2015-03-24T09:52:56",
+   "old": "(secret_project)_market_analysis.xlsx",
+   "new": "new_years_day.jpg"
+  },
+  {
+   "time": "2015-03-24T09:53:08",
+   "old": "(secret_project)_market_shares.xls",
+   "new": "super_bowl.avi"
+  },
+  {
+   "time": "2015-03-24T09:53:38",
+   "old": "(secret_project)_price_analysis_#1.xlsx",
+   "new": "my_favorite_movies.7z"
+  },
+  {
+   "time": "2015-03-24T09:53:52",
+   "old": "(secret_project)_price_analysis_#2.xls",
+   "new": "my_favorite_cars.db"
+  },
+  {
+   "time": "2015-03-24T09:54:05",
+   "old": "(secret_project)_pricing_decision.xlsx",
+   "new": "happy_holiday.jpg"
+  },
+  {
+   "time": "2015-03-24T09:54:23",
+   "old": "[secret_project]_progress_#1.docx",
+   "new": "my_smartphone.png"
+  },
+  {
+   "time": "2015-03-24T09:54:43",
+   "old": "[secret_project]_progress_#2.docx",
+   "new": "new_year_calendar.one"
+  },
+  {
+   "time": "2015-03-24T09:54:52",
+   "old": "[secret_project]_progress_#3.doc",
+   "new": "my_friends.svg"
+  },
+  {
+   "time": "2015-03-24T09:55:08",
+   "old": "[secret_project]_detailed_proposal.docx",
+   "new": "a_gift_from_you.gif"
+  },
+  {
+   "time": "2015-03-24T09:55:17",
+   "old": "[secret_project]_proposal.docx",
+   "new": "landscape.png"
+  },
+  {
+   "time": "2015-03-24T09:55:32",
+   "old": "[secret_project]_technical_review_#1.docx",
+   "new": "diary_#1d.txt"
+  },
+  {
+   "time": "2015-03-24T09:55:42",
+   "old": "[secret_project]_technical_review_#1.pptx",
+   "new": "diary_#1p.txt"
+  },
+  {
+   "time": "2015-03-24T09:55:53",
+   "old": "[secret_project]_technical_review_#2.docx",
+   "new": "diary_#2d.txt"
+  },
+  {
+   "time": "2015-03-24T09:56:09",
+   "old": "[secret_project]_technical_review_#2.ppt",
+   "new": "diary_#2p.txt"
+  },
+  {
+   "time": "2015-03-24T09:56:14",
+   "old": "[secret_project]_technical_review_#3.doc",
+   "new": "diary_#3d.txt"
+  },
+  {
+   "time": "2015-03-24T09:56:20",
+   "old": "[secret_project]_technical_review_#3.ppt",
+   "new": "diary_#3p.txt"
+  }
+ ],
+ "events": [
+  {
+   "time": "2015-03-23T13:29:00",
+   "time_end": null,
+   "lane": "communication",
+   "title": "Email from the conspirator: \"Hello, Iaman\"",
+   "kinds": [
+    "email"
+   ],
+   "terms": [
+    "hello"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:01:00",
+   "time_end": "2015-03-23T14:21:00",
+   "lane": "web",
+   "title": "Searches for data leakage methods (IE and Chrome)",
+   "kinds": [
+    "web_search"
+   ],
+   "terms": [
+    "leak"
+   ],
+   "window_min": 25,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:31:10",
+   "time_end": null,
+   "lane": "devices",
+   "title": "Authorized USB (RM#1) first connected",
+   "kinds": [
+    "usb_connected"
+   ],
+   "terms": [
+    "4C530012450531101593"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:36:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Windows search for \"secret\"",
+   "kinds": [
+    "web_search",
+    "file_opened"
+   ],
+   "terms": [
+    "secret"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:37:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Opened proposal.docx and design_concept.ppt from RM#1",
+   "kinds": [
+    "file_opened"
+   ],
+   "terms": [
+    "proposal",
+    "design_concept"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:39:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Copied confidential files to Desktop\\S data",
+   "kinds": [
+    "file_copied",
+    "file_created"
+   ],
+   "terms": [
+    "s data"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:41:40",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Renamed two confidential files to media names",
+   "kinds": [
+    "file_renamed"
+   ],
+   "terms": [
+    "landscape.png",
+    "space_and_earth.mp4"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T14:44:00",
+   "time_end": null,
+   "lane": "communication",
+   "title": "Email: \"Successfully secured.\"",
+   "kinds": [
+    "email"
+   ],
+   "terms": [
+    "secured"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T15:19:00",
+   "time_end": null,
+   "lane": "communication",
+   "title": "Email with sample space_and_earth.mp4 attached",
+   "kinds": [
+    "email"
+   ],
+   "terms": [
+    "space_and_earth"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:00:00",
+   "time_end": null,
+   "lane": "cloud",
+   "title": "Installed Google Drive and Apple iCloud",
+   "kinds": [
+    "program_installed",
+    "program_executed",
+    "cloud_activity"
+   ],
+   "terms": [
+    "google",
+    "icloud"
+   ],
+   "window_min": 10,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:05:00",
+   "time_end": null,
+   "lane": "cloud",
+   "title": "Logged in to Google Drive",
+   "kinds": [
+    "cloud_activity",
+    "program_executed"
+   ],
+   "terms": [
+    "google"
+   ],
+   "window_min": 8,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:23:00",
+   "time_end": null,
+   "lane": "devices",
+   "title": "Connected network share \\\\10.11.11.128\\secured_drive",
+   "kinds": [
+    "file_opened",
+    "usb_connected"
+   ],
+   "terms": [
+    "10.11.11.128",
+    "secured_drive"
+   ],
+   "window_min": 8,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:26:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Opened pricing_decision.xlsx and final_meeting.pptx on V:",
+   "kinds": [
+    "file_opened"
+   ],
+   "terms": [
+    "pricing_decision",
+    "final_meeting"
+   ],
+   "window_min": 6,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:30:44",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Renamed two more confidential files",
+   "kinds": [
+    "file_renamed"
+   ],
+   "terms": [
+    "happy_holiday.jpg",
+    "do_u_wanna_build_a_snow_man.mp3"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:32:00",
+   "time_end": null,
+   "lane": "cloud",
+   "title": "Uploaded disguised files to Google Drive and shared them",
+   "kinds": [
+    "cloud_activity"
+   ],
+   "terms": [
+    "happy_holiday",
+    "snow_man",
+    "drive"
+   ],
+   "window_min": 6,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:38:00",
+   "time_end": null,
+   "lane": "communication",
+   "title": "Email \"It's me\" with Google Drive links",
+   "kinds": [
+    "email"
+   ],
+   "terms": [
+    "it's me"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-23T16:42:00",
+   "time_end": null,
+   "lane": "cloud",
+   "title": "Deleted the files from Google Drive",
+   "kinds": [
+    "cloud_activity",
+    "file_deleted"
+   ],
+   "terms": [
+    "happy_holiday",
+    "snow_man"
+   ],
+   "window_min": 6,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T09:38:00",
+   "time_end": null,
+   "lane": "devices",
+   "title": "Authorized USB (RM#1) connected again, 5 files copied",
+   "kinds": [
+    "usb_connected"
+   ],
+   "terms": [
+    "4C530012450531101593"
+   ],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T09:47:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "17 files copied from the network drive",
+   "kinds": [
+    "file_opened",
+    "file_copied",
+    "file_created"
+   ],
+   "terms": [
+    "secured_drive",
+    "v:"
+   ],
+   "window_min": 6,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T09:49:51",
+   "time_end": "2015-03-24T09:56:20",
+   "lane": "coverup",
+   "title": "Renamed 20 confidential files to innocent names",
+   "kinds": [
+    "file_renamed"
+   ],
+   "terms": [
+    "winter_whether_advisory.zip",
+    "diary_#3p.txt",
+    "winter_storm.amr"
+   ],
+   "window_min": 8,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T09:58:32",
+   "time_end": null,
+   "lane": "devices",
+   "title": "Personal USB (RM#2) first connected",
+   "kinds": [
+    "usb_connected"
+   ],
+   "terms": [
+    "4C530012550531106501"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T09:59:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Disguised files copied to RM#2",
+   "kinds": [
+    "deleted_file_recovered",
+    "file_copied"
+   ],
+   "terms": [
+    "rm2"
+   ],
+   "window_min": 4,
+   "needs": "rm2"
+  },
+  {
+   "time": "2015-03-24T10:07:00",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Shift+Delete of Desktop\\S data",
+   "kinds": [
+    "file_deleted"
+   ],
+   "terms": [
+    "s data"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T14:30:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Wrote a resignation letter",
+   "kinds": [
+    "file_opened",
+    "file_created"
+   ],
+   "terms": [
+    "resignation"
+   ],
+   "window_min": 10,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T15:38:00",
+   "time_end": null,
+   "lane": "devices",
+   "title": "RM#2 connected again",
+   "kinds": [
+    "usb_connected"
+   ],
+   "terms": [
+    "4C530012550531106501"
+   ],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T15:51:47",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Burn staging files sent to the Recycle Bin",
+   "kinds": [
+    "recycle_bin"
+   ],
+   "terms": [],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T16:11:42",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "More burn staging files sent to the Recycle Bin",
+   "kinds": [
+    "recycle_bin"
+   ],
+   "terms": [],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T16:40:00",
+   "time_end": null,
+   "lane": "devices",
+   "title": "Burned a CD-R (first attempt)",
+   "kinds": [
+    "cd_burned",
+    "program_executed"
+   ],
+   "terms": [
+    "burn"
+   ],
+   "window_min": 8,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T16:54:00",
+   "time_end": null,
+   "lane": "devices",
+   "title": "Burned confidential files to CD-R (RM#3), then deleted them from the disc",
+   "kinds": [
+    "cd_burned",
+    "carved_file",
+    "file_deleted"
+   ],
+   "terms": [
+    "rm3"
+   ],
+   "window_min": 8,
+   "needs": "rm3"
+  },
+  {
+   "time": "2015-03-24T17:02:00",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Quick-formatted RM#2",
+   "kinds": [
+    "volume_formatted"
+   ],
+   "terms": [],
+   "window_min": 3,
+   "needs": "rm2"
+  },
+  {
+   "time": "2015-03-24T17:05:00",
+   "time_end": null,
+   "lane": "communication",
+   "title": "Email: \"Done\"",
+   "kinds": [
+    "email"
+   ],
+   "terms": [
+    "done"
+   ],
+   "window_min": 5,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-24T17:06:00",
+   "time_end": null,
+   "lane": "web",
+   "title": "Searched \"security checkpoint cd-r\"",
+   "kinds": [
+    "web_search"
+   ],
+   "terms": [
+    "checkpoint"
+   ],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:46:44",
+   "time_end": null,
+   "lane": "web",
+   "title": "Searched for anti-forensic methods",
+   "kinds": [
+    "web_search"
+   ],
+   "terms": [
+    "anti-forensic",
+    "antiforensic",
+    "anti forensic"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:46:54",
+   "time_end": null,
+   "lane": "web",
+   "title": "Searched for \"eraser\"",
+   "kinds": [
+    "web_search"
+   ],
+   "terms": [
+    "eraser"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:47:34",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Downloaded Eraser 6.2",
+   "kinds": [
+    "web_download",
+    "wiping_tool"
+   ],
+   "terms": [
+    "eraser"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:47:51",
+   "time_end": null,
+   "lane": "web",
+   "title": "Searched for \"ccleaner\"",
+   "kinds": [
+    "web_search"
+   ],
+   "terms": [
+    "ccleaner"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:48:12",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Downloaded CCleaner",
+   "kinds": [
+    "web_download",
+    "wiping_tool"
+   ],
+   "terms": [
+    "ccleaner",
+    "ccsetup"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:50:14",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Installed Eraser",
+   "kinds": [
+    "program_installed",
+    "program_executed",
+    "wiping_tool"
+   ],
+   "terms": [
+    "eraser"
+   ],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T10:57:56",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Installed CCleaner",
+   "kinds": [
+    "program_installed",
+    "program_executed",
+    "wiping_tool"
+   ],
+   "terms": [
+    "ccleaner",
+    "ccsetup"
+   ],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T11:13:30",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Ran Eraser",
+   "kinds": [
+    "program_executed",
+    "wiping_tool"
+   ],
+   "terms": [
+    "eraser"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T11:13:39",
+   "time_end": "2015-03-25T11:14:44",
+   "lane": "coverup",
+   "title": "Eraser wiped files in Desktop\\Temp",
+   "kinds": [
+    "file_wiped"
+   ],
+   "terms": [],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T11:15:50",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Ran CCleaner",
+   "kinds": [
+    "program_executed",
+    "wiping_tool"
+   ],
+   "terms": [
+    "ccleaner"
+   ],
+   "window_min": 3,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T11:18:29",
+   "time_end": null,
+   "lane": "coverup",
+   "title": "Uninstalled CCleaner",
+   "kinds": [
+    "program_uninstalled",
+    "wiping_tool"
+   ],
+   "terms": [
+    "ccleaner"
+   ],
+   "window_min": 4,
+   "needs": "pc"
+  },
+  {
+   "time": "2015-03-25T11:24:00",
+   "time_end": null,
+   "lane": "files",
+   "title": "Printed the resignation letter to XPS",
+   "kinds": [
+    "file_created",
+    "file_opened",
+    "program_executed"
+   ],
+   "terms": [
+    "resignation",
+    "xps"
+   ],
+   "window_min": 6,
+   "needs": "pc"
+  }
+ ]
+}
