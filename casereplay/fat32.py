@@ -189,7 +189,9 @@ def parse_directory(data: bytes, base_offset: int, dir_cluster: int) -> list[Dir
         short = _short_name(e[:11], ntres, deleted)
         long_name = "".join(reversed(lfn_parts)) if lfn_parts else ""
         lfn_parts = []
-        if e[:11] in (DOT, DOTDOT):
+        if attr & ATTR_VOLUME_ID and not attr & ATTR_DIRECTORY:
+            name = e[:11].decode("cp437", "replace").rstrip()      # a label is 11 raw characters, no dot
+        elif e[:11] in (DOT, DOTDOT):
             name = short.strip() or "."
             name = "." if e[:11] == DOT else ".."
         else:

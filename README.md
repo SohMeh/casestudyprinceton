@@ -93,7 +93,7 @@ In the app choose "NIST CFReDS: Data Leakage Case" and press "Send all agents". 
 ## How it maps to the judging criteria
 
 - **Analytical depth.** Content over names: container-aware type detection, cross-device identity by hash, format dating from the volume label entry, wipe detection from journal rename patterns.
-- **Technical implementation.** Pure Python, read-only, deterministic and re-runnable. 9 tests, including an end-to-end run and a scripted deep-agent run.
+- **Technical implementation.** Pure Python, read-only, deterministic and re-runnable. 11 tests: an end-to-end run, a scripted deep-agent run, and cross-checks against file systems written by standard tools (mkfs.vfat, mtools, genisoimage) rather than by our own generator.
 - **Usefulness.** Case tracking, agent dispatch, human review of every finding, recovered files one click away, a printable narrative with citations.
 - **Visualization and demo.** Interactive timeline, file threads, replay, 3D view.
 - **Responsible compute.** The forensic work uses no model at all. The LLM only plans and writes, over a few kilobytes of ledger JSON.

@@ -32,7 +32,7 @@ def make_docx(text: str) -> bytes:
     from docx import Document
 
     doc = Document()
-    doc.core_properties.title = text
+    doc.core_properties.title = text[:200]
     doc.core_properties.author = "r.vance"
     doc.add_paragraph(text)
     buf = io.BytesIO()
