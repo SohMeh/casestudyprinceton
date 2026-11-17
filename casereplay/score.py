@@ -98,7 +98,8 @@ def score(case: Case, store: CaseStore, ref: dict) -> dict[str, Any]:
 
     # 5. RM#3: carved documents by type and size.
     truth3 = ref.get("rm3_files", [])
-    carved = [f for f in by_img("rm3", ("carved_file",)) if f["data"]["true_type"] not in ("JPEG", "PNG")]
+    carved = [f for f in by_img("rm3", ("carved_file", "deleted_file_recovered"))
+              if f["data"]["true_type"] not in ("JPEG", "PNG")]
     used: set[str] = set()
     got = []
     for t in truth3:
@@ -109,7 +110,7 @@ def score(case: Case, store: CaseStore, ref: dict) -> dict[str, Any]:
                 used.add(f["id"])
                 got.append(t["name"])
                 break
-    checks.append(_check("rm3_carving", "RM#3: deleted documents carved from the CD-R (type and size)", got,
+    checks.append(_check("rm3_carving", "RM#3: deleted documents recovered from the CD-R (type and size)", got,
                          [t["name"] for t in truth3], "One file is only partly recoverable per the answer key.",
                          ran="rm3" in examined))
 

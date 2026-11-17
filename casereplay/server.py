@@ -153,9 +153,12 @@ def create_app(store_root: str | Path = "cases") -> FastAPI:
             if f["id"] != finding_id:
                 continue
             for e in f["evidence"]:
-                p = e.get("extracted_to")
-                if p and Path(p).resolve().is_relative_to(root) and Path(p).exists():
-                    return FileResponse(p, filename=f["data"].get("name") or Path(p).name,
+                rel = e.get("extracted_to")
+                if not rel:
+                    continue
+                p = (store.case_dir(case_id) / rel).resolve()      # stored relative to the case folder
+                if p.is_relative_to(root) and p.exists():
+                    return FileResponse(p, filename=f["data"].get("name") or p.name,
                                         media_type="application/octet-stream")
         raise HTTPException(404, "no recovered file for this finding")
 

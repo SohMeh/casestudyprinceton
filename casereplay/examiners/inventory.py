@@ -30,7 +30,7 @@ def _when(case: Case, dt):
 
 
 def _listed(case: Case, image: ImageRef, dev, *, name: str, path: str, data: bytes, size: int,
-            created, modified, source: str, offset: int, fs: str) -> Finding:
+            created, modified, source: str, offset: int, fs: str, time_source: str = "") -> Finding:
     true_type = sniff(data) if data else "EMPTY"
     sha = sha256(data) if data else None
     return Finding(
@@ -38,7 +38,7 @@ def _listed(case: Case, image: ImageRef, dev, *, name: str, path: str, data: byt
         title=f"{name} on {image.label}",
         summary=f"{path} ({human(size)}) is a live file on {image.label}. Content type: {true_type}.",
         time=_when(case, created),
-        time_source=f"{fs} created time: when the file was written to this device",
+        time_source=time_source or f"{fs} created time: when the file was written to this device",
         entities=[dev, file_entity(sha, name)],
         evidence=[Evidence(image=image.name, source=source, path=path, offset=offset, length=size, sha256=sha)],
         confidence=0.99, severity=1, tags=["live"],
@@ -48,6 +48,55 @@ def _listed(case: Case, image: ImageRef, dev, *, name: str, path: str, data: byt
               "modified_local": modified.isoformat() if modified else None,
               "doc": document_meta(data, true_type) if data else {}},
     )
+
+
+def _udf_states(case, image, dev, fh, vol, s, snaps, findings: list[Finding], log: Log) -> int:
+    """List what the disc shows now, and log each recorded state of a write-once disc."""
+    first_seen: dict[int, object] = {}
+    for sn in snaps:
+        for key in sn.nodes:
+            first_seen.setdefault(key, sn.time)
+    live = 0
+    for node in snaps[-1].files():
+        data = udf.node_bytes(fh, vol.offset, s, node) if node.size <= MAX_HASH_FILE else b""
+        sector = node.data_sector(s.partition_start)
+        findings.append(_listed(
+            case, image, dev, name=node.name, path=node.path, data=data, size=node.size,
+            created=first_seen.get(node.vblock) or node.modified, modified=node.modified, fs="UDF",
+            source="UDF file entry in the current directory",
+            offset=vol.offset + sector * udf.SECTOR if sector is not None else None,
+            time_source=("disc session time: when this state of the disc was written (VAT)"
+                         if first_seen.get(node.vblock) else "UDF file modification time")))
+        live += 1
+    if len(snaps) > 1:
+        for prev, sn in zip([None] + snaps[:-1], snaps):
+            added = [n for k, n in sn.nodes.items() if not n.is_dir and (prev is None or k not in prev.nodes)]
+            gone = [n for k, n in (prev.nodes.items() if prev else []) if not n.is_dir and k not in sn.nodes]
+            if prev is not None and not added and not gone:
+                continue
+            if prev is None and not sn.nodes:
+                title, text = f"{image.label} prepared for writing", "The disc was formatted with a live file system. It held no files yet."
+            elif added:
+                size = sum(n.size for n in added) / 1048576
+                title = f"{len(added)} file{'s' if len(added) != 1 else ''} burned to {image.label}"
+                text = (f"{len(added)} files ({size:.1f} MB) were written to the disc in this session: "
+                        + ", ".join(n.name for n in added[:6]) + (f" and {len(added) - 6} more." if len(added) > 6 else "."))
+            else:
+                continue
+            findings.append(Finding(
+                kind="cd_burned", agent=AGENT, title=title,
+                summary=text + f" This is recorded state {sn.index + 1} of {len(snaps)} on the disc.",
+                time=_when(case, sn.time), time_source="VAT write time: each eject of a live disc records a dated state",
+                entities=[dev],
+                evidence=[Evidence(image=image.name, source="UDF Virtual Allocation Table (VAT) entry",
+                                   offset=vol.offset + sn.vat_sector * udf.SECTOR, length=udf.SECTOR,
+                                   detail=f"state {sn.index + 1} of {len(snaps)}, sector {sn.vat_sector}")],
+                confidence=0.97, severity=2, tags=["disc-session"],
+                data={"state": sn.index + 1, "states": len(snaps), "files_added": [n.path for n in added],
+                      "files_total": len(sn.files())},
+            ))
+        log(f"{image.label}: the disc keeps {len(snaps)} dated states from {snaps[0].time} to {snaps[-1].time}")
+    return live
 
 
 def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list[Finding]:
@@ -116,7 +165,11 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
                 label = v.label
             elif vol.fstype == "UDF":
                 s = udf.scan(fh, vol.offset, vol.offset + vol.size if vol.size else None)
-                for name in sorted(s.visible_names()):
+                label = s.label
+                snaps = udf.snapshots(fh, s, vol.offset)
+                if snaps:
+                    live = _udf_states(case, image, dev, fh, vol, s, snaps, findings, log)
+                for name in ([] if snaps else sorted(s.visible_names())):
                     fe = udf.entry_for(s, name)
                     data = udf.read_file(fh, s, fe, vol.offset) if fe and fe.size <= MAX_HASH_FILE else b""
                     if data and sniff(data) not in ("UNKNOWN", "EMPTY"):
@@ -139,7 +192,8 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
         except Exception as exc:  # keep going: a damaged volume is still evidence
             log(f"{image.label}: could not list {vol.fstype} volume ({exc})")
         vol.label = label
-        log(f"{image.label}: {vol.fstype} volume{' \"' + label + '\"' if label else ''}, {live} live files")
+        quoted = f' "{label}"' if label else ""
+        log(f"{image.label}: {vol.fstype} volume{quoted}, {live} live files")
         findings.append(Finding(
             kind="system_info", agent=AGENT,
             title=f"{image.label}: {vol.fstype} volume" + (f' "{label}"' if label else ""),

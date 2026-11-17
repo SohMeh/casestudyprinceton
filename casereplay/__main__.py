@@ -93,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {'found  ' if im.exists() else 'missing'}  {im.label:16} {im.path}")
         if a.run:
             pipeline.dispatch(store, case.id, echo=print)
+            case = store.load_case(case.id)
             _print_score(score.score(case, store, score.load_reference(case.reference)))
         else:
             print(f"\nCase registered as '{case.id}'. Next: python -m casereplay run {case.id}")

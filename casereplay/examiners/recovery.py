@@ -36,7 +36,7 @@ def _when(case: Case, dt):
 
 
 def _recovered(case, image, dev, out_dir, *, name, path, data, size, created, modified, source,
-               detail, offset, method, fs, deleted_flag) -> Finding:
+               detail, offset, method, fs, deleted_flag, time_source: str = "", extra: dict | None = None) -> Finding:
     true_type = sniff(data)
     sha = sha256(data)
     target = out_dir / f"{sha[:10]}_{safe_name(name)}"
@@ -48,18 +48,100 @@ def _recovered(case, image, dev, out_dir, *, name, path, data, size, created, mo
         summary=(f"{path} ({human(size)}) was recovered from {image.label}. "
                  f"{detail} Content type: {true_type}."),
         time=_when(case, created),
-        time_source=f"{fs} created time: when the file was written to this device",
+        time_source=time_source or f"{fs} created time: when the file was written to this device",
         entities=[dev, file_entity(sha, name)],
         evidence=[Evidence(image=image.name, source=source, path=path, offset=offset, length=len(data),
-                           sha256=sha, extracted_to=str(target))],
+                           sha256=sha, extracted_to=f"recovered/{image.id}/{target.name}")],
         confidence=0.95 if intact else 0.5, severity=2,
         tags=["recovered", method] + (["entry-deleted"] if deleted_flag else []),
         data={"name": name, "path": path, "size": size, "true_type": true_type, "sha256": sha,
               "head16": head16(data), "intact": intact, "method": method, "state": "deleted",
               "created_local": created.isoformat() if created else None,
               "modified_local": modified.isoformat() if modified else None,
-              "doc": document_meta(data, true_type)},
+              "doc": document_meta(data, true_type), **(extra or {})},
     )
+
+
+def _udf_history(case, image, dev, out_dir, fh, vol, s, snaps, findings: list[Finding],
+                 taken: list[tuple[int, int]], log: Log) -> None:
+    """Replay a write-once disc from its chain of VATs and recover everything it no longer lists."""
+    last = snaps[-1]
+    first_seen: dict[int, tuple] = {}
+    latest: dict[int, tuple] = {}
+    for sn in snaps:
+        for key, node in sn.nodes.items():
+            first_seen.setdefault(key, (sn, node))
+            latest[key] = (sn, node)
+    removed_at = {}
+    for prev, sn in zip(snaps[:-1], snaps[1:]):
+        for key in prev.nodes:
+            if key not in sn.nodes:
+                removed_at[key] = sn
+
+    def spans(node):
+        return [(vol.offset + (s.partition_start + b) * udf.SECTOR, vol.offset + (s.partition_start + b) * udf.SECTOR + n)
+                for b, n in node.extents]
+
+    for node in last.files():
+        taken.extend(spans(node))                              # still listed: not a recovery
+    n0 = len(findings)
+    for key, (sn_last, node) in sorted(latest.items()):
+        if node.is_dir or key in last.nodes:
+            continue
+        sn_first, born = first_seen[key]
+        gone = removed_at.get(key)
+        data = udf.node_bytes(fh, vol.offset, s, node)
+        if not data:
+            continue
+        taken.extend(spans(node))
+        sector = node.data_sector(s.partition_start)
+        was = f" It was last listed as {node.path}." if node.path != born.path else ""
+        when_gone = f" and removed from the directory at {gone.time:%H:%M:%S}" if gone and gone.time else ""
+        f = _recovered(
+            case, image, dev, out_dir, name=node.name, path=born.path, data=data, size=node.size,
+            created=sn_first.time or node.modified, modified=node.modified, fs="UDF",
+            source="UDF file entry reached through an earlier VAT (older state of the disc)",
+            detail=(f"The disc listed it from {sn_first.time:%H:%M:%S}{when_gone}.{was} "
+                    "A write-once disc cannot erase a file, it only stops listing it."
+                    if sn_first.time else "An older state of the disc lists it. The current one does not."),
+            offset=vol.offset + sector * udf.SECTOR if sector is not None else None,
+            method="udf-vat-history", deleted_flag=True,
+            time_source="disc session time: when the state that first lists this file was written (VAT)",
+            extra={"last_path": node.path, "removed_at": _when(case, gone.time) if gone else None,
+                   "fragments": len(node.extents)})
+        findings.append(f)
+        if gone and gone.time:
+            findings.append(Finding(
+                kind="file_deleted", agent=AGENT, title=f"{node.name} removed from the disc directory",
+                summary=(f"{node.path} was listed on {image.label} in state {gone.index} and is gone in state "
+                         f"{gone.index + 1}, written at {gone.time:%Y-%m-%d %H:%M:%S} local time. The content stayed "
+                         "on the disc and has been recovered."),
+                time=_when(case, gone.time), time_source="VAT write time of the first state without the file",
+                entities=[dev, file_entity(f.data["sha256"], node.name)],
+                evidence=[Evidence(image=image.name, source="UDF Virtual Allocation Table (VAT) entry",
+                                   path=node.path, offset=vol.offset + gone.vat_sector * udf.SECTOR, length=udf.SECTOR,
+                                   detail=f"state {gone.index + 1} of {len(snaps)}, sector {gone.vat_sector}")],
+                confidence=0.95, severity=2, tags=["udf", "disc-history"],
+                data={"name": node.name, "path": node.path, "state": "deleted", "method": "udf-vat-history",
+                      "based_on": f.id, "sha256": f.data["sha256"]},
+            ))
+    for ch in udf.history(snaps):
+        if ch.kind == "renamed" and ch.time:
+            what = "Folder" if ch.node.is_dir else "File"
+            findings.append(Finding(
+                kind="file_renamed", agent=AGENT, title=f"{what} {ch.old_name} renamed to {ch.node.name} on the disc",
+                summary=(f"{what} {ch.old_name} on {image.label} was renamed to {ch.node.name} at "
+                         f"{ch.time:%H:%M:%S} local time."),
+                time=_when(case, ch.time), time_source="VAT write time of the state with the new name",
+                entities=[dev],
+                evidence=[Evidence(image=image.name, source="UDF Virtual Allocation Table (VAT) entry", path=ch.node.path,
+                                   offset=vol.offset + snaps[ch.snapshot].vat_sector * udf.SECTOR, length=udf.SECTOR,
+                                   detail=f"state {ch.snapshot + 1} of {len(snaps)}")],
+                confidence=0.95, severity=2, tags=["udf", "disc-history", "rename"],
+                data={"old_name": ch.old_name, "new_name": ch.node.name, "name": ch.node.name, "is_dir": ch.node.is_dir},
+            ))
+    recovered = sum(1 for f in findings[n0:] if f.kind == "deleted_file_recovered")
+    log(f"{image.label}: replayed {len(snaps)} recorded states of the disc, recovered {recovered} files it no longer lists")
 
 
 def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list[Finding]:
@@ -121,15 +203,18 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
         elif vol.fstype == "UDF":
             try:
                 s = udf.scan(fh, vol.offset, end)
+                snaps = udf.snapshots(fh, s, vol.offset)
+                if snaps:
+                    _udf_history(case, image, dev, out_dir, fh, vol, s, snaps, findings, taken, log)
                 visible = s.visible_names()
-                for f in s.files:
+                for f in ([] if snaps else s.files):
                     if f.file_type == 5 and f.extents:
                         off = vol.offset + (s.partition_start + f.extents[0][0]) * udf.SECTOR
                         if any(n.name in visible and not n.deleted_flag for n in f.names):
                             taken.append((off, off + f.size))      # still listed: not a recovery
                         else:
                             udf_by_offset[off] = f
-                hidden = s.hidden_names()
+                hidden = [] if snaps else s.hidden_names()
                 for n in hidden:
                     findings.append(Finding(
                         kind="file_deleted", agent=AGENT,
@@ -143,7 +228,8 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
                         confidence=0.85, severity=2, tags=["name-only", "udf"],
                         data={"name": n.name, "path": "\\" + n.name, "state": "deleted", "method": "udf-old-directory"},
                     ))
-                log(f"{image.label}: {len(hidden)} file names appear only in older disc directories")
+                if not snaps:
+                    log(f"{image.label}: {len(hidden)} file names appear only in older disc directories")
             except Exception as exc:
                 log(f"{image.label}: UDF directory scan failed ({exc})")
 
@@ -181,7 +267,7 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
                     time_source="UDF file entry modification time" if written else None,
                     entities=[dev, file_entity(c.sha256, disc_name or label[:60])],
                     evidence=[Evidence(image=image.name, source="signature carving (header and internal structure)",
-                                       offset=c.offset, length=c.size, sha256=c.sha256, extracted_to=str(target))],
+                                       offset=c.offset, length=c.size, sha256=c.sha256, extracted_to=f"recovered/{image.id}/{target.name}")],
                     confidence=0.9 if c.complete else 0.5, severity=2, tags=["recovered", "carved"],
                     data={"name": disc_name or name, "named": bool(disc_name), "size": c.size,
                           "true_type": c.type, "sha256": c.sha256,
