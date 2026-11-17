@@ -132,4 +132,29 @@ def run_case(case: Case, store: CaseStore, log: Log = print) -> list[Finding]:
                     fd.data["true_name"] = true_name
                     fd.summary += f" Identical content exists elsewhere in the case as {true_name}."
     log(f"{n_links} files were matched across devices or names by content")
+
+    # 3. The computer's change journal: a rename from a document name to a media name, before the copy.
+    renames = sorted((f for f in store.load_findings(case.id) if f["kind"] == "file_renamed" and f.get("time")
+                      and f["data"].get("old_name") and f["data"].get("new_name")), key=lambda f: f["time"])
+    named = 0
+    for fd in flagged.values():
+        if not fd.time:
+            continue
+        before = [r for r in renames if r["data"]["new_name"].lower() == fd.data["name"].lower() and r["time"] <= fd.time]
+        if not before:
+            continue
+        r = before[-1]
+        original = r["data"]["old_name"]
+        agrees = fd.data.get("true_name") in (None, original)
+        fd.data.setdefault("true_name", original)
+        fd.data["renamed_by"] = r["id"]
+        fd.data["supports"] = sorted(set(fd.data.get("supports", [])) | {r["id"]})
+        fd.summary += (f" The computer's change journal shows {original} being renamed to {fd.data['name']} "
+                       f"before this copy was made" + ("." if agrees else
+                                                      f", while identical content elsewhere is named {fd.data['true_name']}."))
+        fd.evidence += [Evidence(**{**e, "detail": f"rename on the computer: {original} to {fd.data['name']}"}) for e in r["evidence"][:1]]
+        fd.confidence = 0.99
+        named += 1
+    if named:
+        log(f"{named} disguised files traced back to their original name through the computer's rename records")
     return findings

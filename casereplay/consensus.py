@@ -183,6 +183,23 @@ def build(case: Case, store: CaseStore) -> dict[str, Any]:
         if not true_name:
             honest = [s["name"] for s in sightings if s["named"] and not s["disguised"]]
             true_name = honest[0] if honest else None
+        if not true_name:                                  # the disguise agent may know it from the computer's renames
+            true_name = next((dz["data"]["true_name"] for f in items for dz in [disguises.get(f["id"])]
+                              if dz and dz["data"].get("true_name")), None)
+        # What the computer's journal says happened to this file: the disguising rename and the deletion.
+        for rid in sorted({dz["data"]["renamed_by"] for f in items for dz in [disguises.get(f["id"])]
+                           if dz and dz["data"].get("renamed_by")}):
+            r = by_id.get(rid)
+            if not r:
+                continue
+            dev = _device(r)
+            sightings.append({
+                "finding": r["id"], "image_id": r["data"].get("image_id"), "device": dev["label"] if dev else "?",
+                "name": r["data"]["new_name"], "named": True, "state": "renamed", "time": r.get("time"),
+                "true_type": items[0]["data"].get("true_type"), "size": None, "disguised": True,
+                "disguise_finding": None, "was": r["data"]["old_name"]})
+            devices.add(r["data"].get("image_id"))
+        sightings.sort(key=lambda x: (x.get("time") or "9999", x.get("image_id") or ""))
         doc = next((f["data"].get("doc") for f in items if f["data"].get("doc")), {}) or {}
         journeys.append({
             "id": "j_" + root[:12], "sha256": root, "true_name": true_name,

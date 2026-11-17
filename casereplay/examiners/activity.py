@@ -722,7 +722,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             owner = box.name.split("@")[0].split(".")[0].lower()
             pff = pypff.file()
             pff.open_file_object(box.open())
-            real: list[tuple[str, datetime]] = []              # (subject, time) of messages still in the mailbox
+            real: list[tuple[str, str, datetime]] = []         # (subject, sender, time) of messages still in the mailbox
             quoted: list[tuple[dict, str, str]] = []
 
             def walk(folder, name: str) -> None:
@@ -742,7 +742,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                         when = (m.client_submit_time if sent else m.delivery_time) or m.delivery_time or m.client_submit_time
                         if not when:
                             continue
-                        real.append((subject.lower(), _t(to_iso(when))))
+                        real.append((subject.lower(), sender.lower(), _t(to_iso(when))))
                         quoted.extend((q, subject, name) for q in quotes)
                         c.add("email", (f'Email sent: "{subject}"' if sent else f'Email from {sender}: "{subject}"'),
                               (f'{"Sent by" if sent else "Received from"} {sender}. Folder: {name}. '
@@ -768,8 +768,8 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             for q, inside, folder_name in quoted:
                 iso = case.local_to_iso(q["sent_local"])
                 key = (q["subject"].lower(), iso[:16], q["from"].lower())
-                still_there = any(sub == q["subject"].lower() and abs((when - _t(iso)).total_seconds()) <= 180
-                                  for sub, when in real)
+                still_there = any(sub == q["subject"].lower() and who == q["from"].lower()
+                                  and abs((when - _t(iso)).total_seconds()) <= 180 for sub, who, when in real)
                 if key in seen_q or still_there:
                     continue
                 seen_q.add(key)
@@ -815,7 +815,8 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                     parent = f"{segment_reference(up)}#{up.SequenceNumber}"
                     try:                                   # remember every folder the journal names
                         if int(raw.FileAttributes) & 0x10 and ("FILE_CREATE" in reason or "RENAME_NEW_NAME" in reason):
-                            folders[seg] = (name, parent, up, fs)
+                            if seg not in folders or folders[seg][0].lower().startswith("new folder"):
+                                folders[seg] = (name, parent, up, fs)       # keep the name the user gave it first
                     except Exception:
                         pass
                     if not wanted(reason, name):

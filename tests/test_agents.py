@@ -33,9 +33,11 @@ def test_pipeline_end_to_end(case):
             "carved_file", "file_listed"} <= kinds
     assert all(x["evidence"] for x in f), "every finding carries an evidence pointer"
     tl = store.load_json(c.id, "timeline.json")
-    full = [j for j in tl["journeys"] if len(j["devices"]) == 3]
+    full = [j for j in tl["journeys"] if {"usb1", "usb2", "disc"} <= set(j["devices"])]
     assert len(full) == 4                      # four documents seen on all three media
     assert all(j["true_name"].startswith("kestrel_") for j in full)
+    assert all("pc" in j["devices"] for j in full)          # and the computer's rename record joins each journey
+    assert all(any(s["state"] == "renamed" and s["was"] == j["true_name"] for s in j["sightings"]) for j in full)
     fm = [x for x in f if x["kind"] == "volume_formatted"][0]
     assert fm["data"]["time_precise"] and fm["time"].startswith("2025-09-16T21:02")   # 17:02 local, in UTC
 
