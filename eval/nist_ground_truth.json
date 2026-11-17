@@ -409,7 +409,8 @@
    "title": "Windows search for \"secret\"",
    "kinds": [
     "web_search",
-    "file_opened"
+    "file_opened",
+    "folder_browsed"
    ],
    "terms": [
     "secret"
@@ -423,7 +424,8 @@
    "lane": "files",
    "title": "Opened proposal.docx and design_concept.ppt from RM#1",
    "kinds": [
-    "file_opened"
+    "file_opened",
+    "folder_browsed"
    ],
    "terms": [
     "proposal",
@@ -529,7 +531,8 @@
    "title": "Connected network share \\\\10.11.11.128\\secured_drive",
    "kinds": [
     "file_opened",
-    "usb_connected"
+    "usb_connected",
+    "folder_browsed"
    ],
    "terms": [
     "10.11.11.128",
@@ -544,7 +547,8 @@
    "lane": "files",
    "title": "Opened pricing_decision.xlsx and final_meeting.pptx on V:",
    "kinds": [
-    "file_opened"
+    "file_opened",
+    "folder_browsed"
    ],
    "terms": [
     "pricing_decision",
@@ -636,7 +640,8 @@
    "kinds": [
     "file_opened",
     "file_copied",
-    "file_created"
+    "file_created",
+    "folder_browsed"
    ],
    "terms": [
     "secured_drive",
@@ -711,7 +716,8 @@
    "title": "Wrote a resignation letter",
    "kinds": [
     "file_opened",
-    "file_created"
+    "file_created",
+    "folder_browsed"
    ],
    "terms": [
     "resignation"
@@ -1001,7 +1007,8 @@
    "kinds": [
     "file_created",
     "file_opened",
-    "program_executed"
+    "program_executed",
+    "folder_browsed"
    ],
    "terms": [
     "resignation",
