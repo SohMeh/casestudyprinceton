@@ -20,7 +20,7 @@ from ..util import head16, human, sha256
 AGENT = "inventory"
 Log = Callable[[str], None]
 MAX_HASH_FILE = 256 * 1024 * 1024
-MAX_VERIFY = 1 << 30
+MAX_VERIFY = 16 << 30
 
 
 def _when(case: Case, dt):
@@ -103,11 +103,14 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
     findings: list[Finding] = []
     dev = device_entity(image.id, image.label)
 
-    # 1. Integrity. Compare against the hash published with the image.
+    # 1. Integrity. Compare against the hash published with the image. A split image has one hash per segment.
     if image.sha1_expected and not image.sha1_actual:
-        total = sum(p.stat().st_size for p in Path(image.path).parent.glob(Path(image.path).stem + ".*"))
-        if total <= MAX_VERIFY:
-            image.sha1_actual = file_sha1(image.path)
+        first = Path(image.path)
+        want = image.sha1_expected.split(",")
+        parts = sorted(first.parent.glob(first.stem + ".[EeLl]??")) if len(want) > 1 else [first]
+        if len(parts) == len(want) and sum(p.stat().st_size for p in parts) <= MAX_VERIFY:
+            log(f"{image.label}: hashing {len(parts)} image file{'s' if len(parts) != 1 else ''}")
+            image.sha1_actual = ",".join(file_sha1(str(p)) for p in parts)
             store.save_case(case)
     if image.sha1_expected:
         if image.sha1_actual:
@@ -116,7 +119,7 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
             findings.append(Finding(
                 kind="system_info", agent=AGENT,
                 title=f"{image.label}: image hash {'verified' if ok else 'MISMATCH'}",
-                summary=(f"SHA-1 of {image.name} is {image.sha1_actual}. "
+                summary=(f"SHA-1 of {image.name} is {image.sha1_actual.replace(',', ', ')}. "
                          + ("It matches the value published with the image." if ok
                             else f"Expected {image.sha1_expected}. Do not rely on this copy.")),
                 entities=[dev],

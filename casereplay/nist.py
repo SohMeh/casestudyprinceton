@@ -13,7 +13,9 @@ from .ledger import Case, CaseStore, ImageRef
 
 CASE_ID = "nist-data-leakage"
 IMAGES = [
-    ("pc", "cfreds_2015_data_leakage_pc.E01", "Suspect PC", "computer", "72432916933F5A309A8C456B40C9601D1F8D2A4F"),
+    ("pc", "cfreds_2015_data_leakage_pc.E01", "Suspect PC", "computer",       # four segments, one hash each
+     "72432916933F5A309A8C456B40C9601D1F8D2A4F,0CAF4261ED8432A8B3BAA019B1B28FDF96F79130,"
+     "BE836C891736C4C0C2253C6803399BF0F2A599BA,9159BFFD56097495F73FBBF967B75EB288B1E3DE"),
     ("rm1", "rm1.E01", "USB stick RM#1", "usb", "FFD0F3CBA3DFE3291F786B845A06A8AA56C1CD8C"),
     ("rm2", "rm2.E01", "USB stick RM#2", "usb", "2228554CD6FDD3C85BB80E0A0CD7F21A2364DC99"),
     ("rm3", "rm3_type3.E01", "CD-R RM#3", "optical", "75C106FDB2FD2F8068190E951589FF1F9860257E"),
@@ -26,8 +28,8 @@ def build_case(store: CaseStore, data_dir: Path) -> Case:
     try:
         old = {im.id: im for im in store.load_case(CASE_ID).images}
         for im in images:
-            if im.id in old and old[im.id].path == im.path:
-                im.sha1_actual = old[im.id].sha1_actual
+            if im.id in old and old[im.id].sha1_expected == im.sha1_expected:
+                im.sha1_actual = old[im.id].sha1_actual      # same published hashes: keep the verification
     except FileNotFoundError:
         pass
     case = Case(
