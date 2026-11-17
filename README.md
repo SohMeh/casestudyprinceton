@@ -4,7 +4,9 @@ Agents that rebuild what happened on seized devices, and a timeline an investiga
 
 Built at HackPrinceton Fall 2026 for the Arlequin AI track "AI-Driven Forensics".
 
-![A recovered file traced across three devices](docs/timeline-thread.png)
+![One confidential file traced across four devices in the NIST leak case](docs/timeline-thread.png)
+
+*The real NIST case. One PowerPoint file starts on the company USB stick under its own name, is renamed to `winter_whether_advisory.zip` on the PC, is copied to a second stick that is later formatted, and ends on a CD-R from which it is then removed. Every stop is proven by hash or by a journal record.*
 
 ## The problem
 
@@ -21,10 +23,10 @@ You open a case, point it at the images and send out agents. Each agent has one 
 | Agent | Job | How |
 |---|---|---|
 | Intake | Verify each image, list what it shows today | SHA-1 against the published hash, volume detection, hash and true type of every live file |
-| Recovery | Bring back deleted files | FAT32 directory clusters that survive a quick format, deleted exFAT entry sets, old UDF directories on write-once discs, structure-aware carving |
-| Disguise | Catch files under false names | Extension against real content (looks inside ZIP and OLE containers), then matches identical content across devices to reveal the original name |
+| Recovery | Bring back deleted files | FAT32 directory clusters that survive a quick format, stale entries from an earlier format, deleted exFAT entry sets, every past state of a write-once disc, structure-aware carving |
+| Disguise | Catch files under false names | Extension against real content (looks inside ZIP and OLE containers), identical content across devices, and the computer's own rename records to reveal the original name |
 | Wiper | Flag evidence destruction | Quick-format detection and dating, traces of erasers and cleaners, the rename-then-delete pattern of secure erasers in the NTFS journal |
-| Activity | Rebuild what the user did on the computer | USB history, searches, downloads, program runs, installs, Recycle Bin, shortcuts, change journal, read straight from the disk image |
+| Activity | Rebuild what the user did on the computer | USB history, searches, downloads, program runs, installs, shortcuts, browsed folders, cloud sync log, email, and the NTFS change journal, read straight from the disk image |
 | Consensus | Put everything on one clock | Groups findings into story beats, follows each file across devices, counts how many agents back each beat, lists what does not add up |
 
 On top sits a **lead investigator built with LangChain deepagents**. It plans the work, delegates to the specialists with the `task` tool, reads the consensus and writes a cited report.
@@ -80,6 +82,35 @@ In the app choose "NIST CFReDS: Data Leakage Case" and press "Send all agents". 
 
 `eval/nist_ground_truth.json` is transcribed from the NIST answer key: 17 files on the formatted USB stick, 17 on the CD-R, 24 disguising renames and 44 timeline events. It is read only by `casereplay/score.py`. No agent or tool can reach it. The Score tab and `./run.sh score nist-data-leakage` report found over expected for each check and list what was missed.
 
+## Results on the NIST Data Leakage Case
+
+All four images, 8.2 GB, hash-verified against the values NIST publishes. Analysis takes about 40 seconds on a 4-core laptop VM with no GPU and no language model, plus about 40 seconds to hash the images.
+
+| Check against the published answer key | Result |
+|---|---|
+| Evidence images match their published SHA-1 | 4 of 4 |
+| USB stick RM#2: files recovered after the quick format, type correct | 17 of 17 |
+| RM#2: recovered sizes agree with the answer key | 17 of 17 |
+| RM#2: disguised files flagged with their true type | 17 of 17 |
+| RM#2: quick format detected and dated inside the answer-key window | yes, 17:02:36 |
+| CD-R RM#3: deleted documents recovered | 17 of 17 |
+| PC: disguising renames recovered from the change journal | 24 of 24 |
+| Timeline: answer-key events with a matching, evidenced finding | 42 of 44 |
+
+The two timeline misses: the name of an email attachment (the mailbox keeps only a quote of that message, without the attachment), and the resignation letter, which we date 18 minutes later than the reference time we transcribed.
+
+What the agents found that a keyword search would not:
+
+- **The formatted stick.** All 17 confidential documents came back intact from directory clusters that survived the format. Each carried a media or text extension. Each was traced to its original name twice: by content hash against the company stick, and by the rename record in the PC's change journal.
+- **Two independent clocks for the format.** The new volume label on the stick says 17:02:36. The PC's registry shows the same label returning with a new volume serial number at 17:02:34.
+- **An earlier life of the same stick.** 22 older files were recovered by fitting stale directory entries to an earlier format with 16 KB clusters.
+- **The CD-R replayed second by second.** A disc written with a live file system keeps every past allocation table. Reading all nine gives each state of the disc with its time: 17 files burned at 16:55:47, five folders renamed between 16:56:14 and 16:56:39, three filler pictures added at 16:57:03, the 17 files removed from the directory at 16:58:15. All 17 were recovered by name, including one stored in two fragments that carving alone can only get partly.
+- **A Recycle Bin that was emptied and wiped.** The journal still records 16 items being moved into it, and 10 files being overwritten by Eraser.
+- **Email that was deleted.** Five messages no longer in the mailbox were recovered from the quotes inside later replies, including the one that carries the Google Drive share links.
+- **A document opened straight from the company stick.** A deleted Office lock file on the stick dates it to 14:37:52 and names the user.
+
+The full account, generated without a language model and with every line citing its findings, is in [docs/nist-case-narrative.md](docs/nist-case-narrative.md).
+
 ## What is real and what is synthetic
 
 - **Practice case (synthetic).** "Halcyon Robotics, Project Kestrel" is invented. The images are generated by `casereplay/synth.py`, but they are real file systems: a quick-formatted FAT32 stick, an exFAT stick with a deleted entry, a write-once UDF disc with an old and a new directory. The workstation activity in this case comes from a generated triage export, not from a disk image.
@@ -87,15 +118,17 @@ In the app choose "NIST CFReDS: Data Leakage Case" and press "Send all agents". 
 
 ## Honest limits
 
-- Mailbox parsing (Outlook OST) is not implemented, so email events from the answer key will show as missed.
+- Reading Outlook mailboxes needs the optional `libpff-python` package. `run.sh` tries to install it. Without it, email is skipped and the log says so. Attachments are not extracted.
 - Recovery after a format assumes files were stored contiguously, which holds for files copied onto a fresh stick. Every recovered file is validated by its content afterwards.
-- The UDF reader is a sector scanner for write-once discs. It does not follow the virtual allocation table, so on some discs names and content are matched by carving and hashing instead.
-- NTFS deleted-file recovery on the PC is limited to what the Recycle Bin and the change journal record.
+- Disc history needs a UDF disc with a virtual allocation table (a "live file system" disc). Other discs are read as a single state, with carving as the fallback.
+- On the PC, deleted files are reported from the change journal and the Recycle Bin. Their content is not carved from the NTFS volume.
+- The answer key was transcribed by hand into `eval/nist_ground_truth.json`. Two reference times could not be re-checked against the PDF.
+- The lead investigator (the LLM layer) is tested with a scripted model. It has not been run with a real model on the NIST case yet.
 
 ## How it maps to the judging criteria
 
-- **Analytical depth.** Content over names: container-aware type detection, cross-device identity by hash, format dating from the volume label entry, wipe detection from journal rename patterns.
-- **Technical implementation.** Pure Python, read-only, deterministic and re-runnable. 11 tests: an end-to-end run, a scripted deep-agent run, and cross-checks against file systems written by standard tools (mkfs.vfat, mtools, genisoimage) rather than by our own generator.
+- **Analytical depth.** Content over names: container-aware type detection, cross-device identity by hash, disc history from allocation tables, an earlier disk layout inferred from stale entries, format dating from two independent sources, wipe detection from journal rename bursts, deleted email recovered from quotes.
+- **Technical implementation.** Pure Python, read-only, deterministic and re-runnable. 15 tests: an end-to-end run, a scripted deep-agent run, and cross-checks against file systems written by standard tools (mkfs.vfat, mtools, genisoimage) rather than by our own generator.
 - **Usefulness.** Case tracking, agent dispatch, human review of every finding, recovered files one click away, a printable narrative with citations.
 - **Visualization and demo.** Interactive timeline, file threads, replay, 3D view.
 - **Responsible compute.** The forensic work uses no model at all. The LLM only plans and writes, over a few kilobytes of ledger JSON.

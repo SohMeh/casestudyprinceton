@@ -81,7 +81,7 @@ async function loadTimeline(fit) {
   tl.index = new Map([...tl.events, ...tl.undated].map((f) => [f.id, f]));
   tl.journeyOf = new Map();
   for (const j of tl.journeys) for (const s of j.sightings) tl.journeyOf.set(s.finding, j);
-  tl.keyBeats = tl.beats.filter((b) => b.severity >= 2);
+  tl.keyBeats = tl.beats.filter((b) => b.severity >= Math.max(2, S.sev));
   for (const f of tl.events) {
     f._t = wall(f.time);
     f._dev = f.entities.find((e) => e.type === "device")?.label || "Unattributed";
@@ -183,7 +183,8 @@ function renderLegend() {
     `<span class="sizes">importance <i style="width:7px;height:7px"></i> <i style="width:11px;height:11px"></i> <i style="width:15px;height:15px"></i> key</span>`;
 }
 function renderDays() {
-  $("#days").innerHTML = S.tl.acts.map((a) => `<button data-day="${a.day}" title="${h(a.headline)}">${h(a.label.slice(0, 10))}</button>`).join("");
+  $("#days").innerHTML = S.tl.acts.filter((a) => a.phase !== "context" || S.tl.acts.length <= 4)
+    .map((a) => `<button data-day="${a.day}" title="${h(a.headline)}">${h(a.label.slice(0, 10))}</button>`).join("");
 }
 
 /* ---------- timeline ---------- */
@@ -332,7 +333,14 @@ function buildChart(fit) {
 
   chart = { x0, xz: x0, draw, zoomTo, W, m };
   if (prev) zoomTo(new Date(Math.max(prev[0], x0.domain()[0])), new Date(Math.min(prev[1], x0.domain()[1])), 0);
-  else draw();
+  else {
+    // Open on the busy part of the case. A few early dates (a file made weeks before) should not squeeze it.
+    const ts = ev.map((f) => +f._t).sort((a, b) => a - b);
+    const lo = ts[Math.floor(ts.length * 0.03)], hi = ts[Math.ceil(ts.length * 0.97) - 1];
+    const span = Math.max(hi - lo, 3600e3);
+    if (span < 0.5 * (t1 - t0)) zoomTo(new Date(Math.max(lo - span * 0.06, x0.domain()[0])), new Date(Math.min(hi + span * 0.06, x0.domain()[1])), 0);
+    else draw();
+  }
 }
 
 function tip(e, html) {
@@ -361,7 +369,7 @@ function renderCaption() {
   if (!b) {
     const n = S.tl.keyBeats.length;
     $("#caption").innerHTML = `<div class="when">${h(c.name)}</div><h1>${n ? "What happened, in order" : "No account yet"}</h1>
-      <p>${n ? `${n} moments across ${S.tl.acts.length} day${S.tl.acts.length === 1 ? "" : "s"}. Press Replay to step through them, or pick anything on the timeline to see the evidence behind it.` : h(c.description || "Send the agents to build the timeline.")}</p>`;
+      <p>${n ? `${n} moments across ${S.tl.acts.length} day${S.tl.acts.length === 1 ? "" : "s"}. Press Replay to step through them, or pick anything on the timeline to see the evidence behind it.${n > 40 ? " Choose Key only for the short version." : ""}` : h(c.description || "Send the agents to build the timeline.")}</p>`;
   } else {
     const a = wall(b.time), z = wall(b.time_end);
     $("#caption").innerHTML = `<div class="when"><span><i class="swatch" style="background:${laneColor(b.lane)}"></i>${fDay(a)}, ${fClock(a)}${z - a > 60000 ? " to " + fClock(z) : ""}</span>
@@ -548,7 +556,13 @@ function bind() {
     after();
   });
   seg("#modeSeg", "mode", "mode", () => buildChart(false));
-  seg("#sevSeg", "sev", "sev", () => { chart?.draw(); renderTab(); refresh3d(); });
+  seg("#sevSeg", "sev", "sev", () => {
+    stopPlay();
+    const cur = S.tl.keyBeats[S.beat]?.id;                       // Replay follows the importance filter
+    S.tl.keyBeats = S.tl.beats.filter((b) => b.severity >= Math.max(2, S.sev));
+    S.beat = S.tl.keyBeats.findIndex((b) => b.id === cur);
+    chart?.draw(); renderCaption(); renderTab(); refresh3d();
+  });
   $("#search").addEventListener("input", (e) => { S.q = e.target.value.trim().toLowerCase(); chart?.draw(); if (S.tab === "findings") renderTab(); refresh3d(); });
   $("#refToggle").addEventListener("change", (e) => { S.showRef = e.target.checked; buildChart(false); });
   $("#legend").addEventListener("click", (e) => {

@@ -2,17 +2,17 @@
 
 Start the app first: `./run.sh`, then open http://127.0.0.1:8000.
 
-Use the NIST case if its images have been examined. Otherwise use the practice case and say it is synthetic.
+Use the NIST case once its images are downloaded (`bash scripts/fetch_dataset.sh`). All numbers below are from that case. Otherwise use the practice case and say it is synthetic.
 
 | Time | Show | Say |
 |---|---|---|
 | 0:00 | The case with an empty timeline, or the evidence list | "An employee is suspected of leaking files. We get disk images. Today this is days of manual work across separate tools, and the result is a slide nobody can check." |
 | 0:15 | Press **Send all agents**. Watch the Activity log fill | "We send out six agents. Each one does a single forensic job and writes what it finds to a shared evidence ledger." |
-| 0:30 | Timeline fills in. Point at the Cover-up lane | "Recovery brought back files from a formatted USB stick. Disguise found that these 'music' and 'photo' files are really Office documents. Wiper dated the format to the minute." |
-| 0:50 | Files tab, pick a row. The thread draws across devices (switch to **By device**) | "This is one document. It starts on the company stick under its real name, shows up on the personal stick as `ringtone.amr`, and ends on a CD-R. Same bytes, proven by hash. Keyword search finds none of this." |
+| 0:30 | Timeline fills in. Point at the Cover-up lane | "Recovery brought back 17 documents from a formatted USB stick. Disguise found that these music and picture files are really Office documents. Wiper dated the format to 17:02:36, and the PC's registry independently says 17:02:34." |
+| 0:50 | Files tab, pick the first row. Switch to **By device**, jump to Tue 24 Mar | "This is one document. It starts on the company stick under its real name, is renamed to `winter_whether_advisory.zip` on the PC, lands on the second stick, and ends on a CD-R. Same bytes, proven by hash. Keyword search finds none of this." |
 | 1:10 | Click a point, show the evidence panel, press **Download the recovered file** | "Every point is checkable: which image, which byte offset, which hash. A reviewer confirms or rejects each finding." |
-| 1:25 | Press **Replay**, let two or three moments play. Optionally **3D view** | "For a jury, the same evidence plays back as a story, one moment at a time." |
-| 1:45 | Score tab (NIST case) or the Narrative tab | "On the public NIST leak case we score ourselves against the published answer key. The agents never see it." |
+| 1:25 | Choose **Key only**, press **Replay**, let two or three moments play. Optionally **3D view** | "For a jury, the same evidence plays back as a story, one moment at a time." |
+| 1:45 | Score tab, tick **Show answer key** | "We score ourselves against NIST's published answer key, which the agents never see. 42 of 44 timeline events, every recovery check complete." |
 | 1:55 | Open report | "And the prosecutor gets a cited report with an exhibit list. The model plans and writes. The tools compute. The ledger proves." |
 
 ## One-line pitch

@@ -13,6 +13,12 @@ if [ -z "$PY" ]; then echo "Python 3.11 or newer is required. On a Mac: brew ins
 [ -d .venv ] || "$PY" -m venv .venv
 .venv/bin/python -m pip install -q --upgrade pip
 .venv/bin/python -m pip install -q -r requirements.txt
+# Optional: Outlook mailboxes (OST and PST). It compiles from source on some systems, so it is best effort.
+if ! .venv/bin/python -c "import pypff" >/dev/null 2>&1 && [ ! -f .venv/.pff_tried ]; then
+  touch .venv/.pff_tried
+  echo "Installing the optional mailbox reader (libpff-python). This can take a minute..."
+  .venv/bin/python -m pip install -q libpff-python >/dev/null 2>&1 || echo "  not available here: email in Outlook mailboxes will be skipped"
+fi
 if [ "${1:-}" = "test" ]; then exec .venv/bin/python -m pytest -q; fi
 if [ $# -eq 0 ]; then exec .venv/bin/python -m casereplay start; fi
 exec .venv/bin/python -m casereplay "$@"

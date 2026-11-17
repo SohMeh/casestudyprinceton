@@ -1,5 +1,6 @@
 # Forensic engine (pure Python, read-only access to images)
 dissect.target>=3.20
+dissect.shellitem>=3.10        # shortcut (LNK) targets
 olefile>=0.47
 # Agents
 deepagents>=0.7
