@@ -151,6 +151,52 @@ def _html_text(raw: Any) -> str:
     return re.sub(r"\s+", " ", htmllib.unescape(text)).strip()
 
 
+def _text_lines(raw: Any) -> list[str]:
+    """Message text as lines. Works for HTML and plain bodies alike."""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", "replace")
+    text = raw or ""
+    if re.search(r"(?i)<(html|body|p|br|div)\b", text):
+        text = re.sub(r"\s+", " ", text)                   # in HTML a line break in the source means nothing
+    text = re.sub(r"(?is)<(style|script|head).*?</\1>", " ", text)
+    text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>|</h\d>", "\n", text)
+    text = htmllib.unescape(re.sub(r"<[^>]+>", " ", text)).replace("\xa0", " ")
+    return [re.sub(r"[ \t\r]+", " ", line).strip() for line in text.split("\n")]
+
+
+def split_quotes(lines: list[str]) -> tuple[str, list[dict]]:
+    """Split a message into its own text and the earlier messages it quotes.
+
+    A reply carries the messages before it, each under a From / Sent / To / Subject header. Those quotes
+    can outlive the originals when the originals are deleted from the mailbox.
+    """
+    heads = [i for i, line in enumerate(lines)
+             if line.startswith("From:") and any(x.startswith("Sent:") for x in lines[i: i + 4])]
+    own = " ".join(x for x in lines[: heads[0] if heads else len(lines)] if x and not x.startswith("-----Original"))
+    quotes = []
+    for k, i in enumerate(heads):
+        end = heads[k + 1] if k + 1 < len(heads) else len(lines)
+        block = lines[i:end]
+        fields, body_at = {}, 0
+        for j, line in enumerate(block[:8]):
+            m = re.match(r"^(From|Sent|To|Cc|Subject):\s*(.*)$", line)
+            if m:
+                fields[m.group(1).lower()] = m.group(2).strip()
+                body_at = j + 1
+        body = " ".join(x for x in block[body_at:] if x and not x.startswith("-----Original"))
+        when = None
+        for fmt in ("%A, %B %d, %Y %I:%M %p", "%A, %B %d, %Y %H:%M", "%a, %d %b %Y %H:%M"):
+            try:
+                when = datetime.strptime(fields.get("sent", ""), fmt)
+                break
+            except ValueError:
+                continue
+        if when and fields.get("from"):
+            quotes.append({"from": fields["from"], "to": fields.get("to", ""), "subject": fields.get("subject", ""),
+                           "sent_local": when, "body": body})
+    return own.strip(), quotes
+
+
 def _b(value: Any) -> str:
     """Text from the bytes or little structs that link files use for strings."""
     for _ in range(3):
@@ -182,6 +228,10 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
     log(f"{image.label}: opening disk image (read-only)")
     t = Target.open(image.path)
     volumes = _image_volumes(case, store)
+    try:
+        os_installed = t.install_date
+    except Exception:
+        os_installed = None
 
     def image_device(label: str = "", vsn: Optional[int] = None) -> Optional[Entity]:
         """The evidence image a volume on this computer corresponds to, by serial number or label."""
@@ -354,12 +404,15 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                       path=_s(_get(r, "source")), detail=url[:300], severity=3 if hot else 1,
                       tags=["search", who], data={"query": q, "engine": engine, "url": url, "browser": who})
                 n += 1
+            elif urlparse(url).netloc.lower().startswith(("www.google.", "google.")) and urlparse(url).path == "/url":
+                c.dropped["search-engine redirect links"] += 1
             elif any(k in low for k in CLOUD) or tool_match(low) or any(k in low for k in INTERESTING_VISIT):
                 key = (urlparse(url).netloc + urlparse(url).path, to_iso(ts)[:16])
                 if key in seen:
                     continue
                 seen.add(key)
-                cloud = next((v for k, v in CLOUD.items() if k in low), None)
+                host = urlparse(url).netloc.lower()
+                cloud = next((v for k, v in CLOUD.items() if k in host), None)
                 c.add("cloud_activity" if cloud else "web_visit",
                       f"Visited {cloud or urlparse(url).netloc}",
                       f"{_s(_get(r, 'title')) or url[:120]} was opened in {who or 'a browser'}.",
@@ -409,13 +462,15 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                              for m in [re.search(r"\\PROGRAM FILES(?: \(X86\))?\\([^\\]+)\\", x, re.I)] if m), "")
                 ts0 = _get(r, "ts")
                 if prog and ts0 and ts0.year > 1990:
-                    c.add("program_uninstalled", f"Uninstalled {prog.title()}",
-                          f"The uninstaller in the {prog.title()} program folder was run, which removes the program.",
+                    known = tool_match(prog)
+                    prog = known[1] if known else prog.title()
+                    c.add("program_uninstalled", f"Uninstalled {prog}",
+                          f"The uninstaller in the {prog} program folder was run, which removes the program.",
                           to_iso(ts0), "Prefetch last-run time of the uninstaller", "Windows Prefetch",
-                          path=_s(_get(r, "prefetch")), detail=next((x for x in linked if prog in x), ""),
-                          severity=3 if tool_match(prog) else 2, tags=["prefetch", "uninstall"],
-                          entities=[Entity("program", f"program:{prog.lower()}", prog.title())],
-                          data={"name": prog.title()})
+                          path=_s(_get(r, "prefetch")), detail=next((x for x in linked if "UNINST" in x.upper()), ""),
+                          severity=3 if known else 2, tags=["prefetch", "uninstall"],
+                          entities=[Entity("program", f"program:{prog.lower()}", prog)],
+                          data={"name": prog})
                     n += 1
                     continue
             for ts in times:
@@ -459,8 +514,8 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             inst, mod = _get(r, "ts_installed"), _get(r, "ts_modified")
             # The install date is often a bare day. The registry key time on that day is the precise moment.
             ts = mod if (mod and (not inst or (inst.hour, inst.minute, inst.second) == (0, 0, 0))) else inst
-            if not ts or ts.year < 1990:
-                c.dropped["installed programs without an install time"] += 1
+            if not ts or ts.year < 1990 or (os_installed and ts < os_installed):
+                c.dropped["components that came with Windows"] += 1
                 continue
             seen.add(nm)
             hot = tool_match(nm)
@@ -529,26 +584,34 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                             pass
                     nm = _name(target) or f.name[:-4]
                     is_folder = "." not in nm[-6:]
+                    dev = image_device(vlabel, vsn) if vsn and target[:1].upper() != "C" else None
+                    external = bool(share) or dev is not None or (target[1:2] == ":" and kind not in (None, 3))
                     where = (f"the network share {share}" if share else
+                             f"{dev.label} (drive {target[:2]})" if dev else
                              f"the {DRIVE_KIND.get(kind, 'drive')} {target[:2]}" if target[1:2] == ":" else "an unknown location")
-                    external = bool(share) or (target[1:2] == ":" and kind not in (None, 3))
-                    dev = image_device(vlabel, vsn) if vsn and kind != 3 else None
                     ext = extension_of(nm)
-                    for when, verb, src in ((born, "Opened", "shortcut creation time: first time this item was opened"),
-                                            (changed, "Opened again:", "shortcut modification time: most recent time it was opened")):
-                        if verb != "Opened" and (changed - born).total_seconds() < 60:
+                    updated = (changed - born).total_seconds() >= 60
+                    for when, first in ((born, True), (changed, False)):
+                        if not first and not updated:
                             continue
                         key = (nm.lower(), to_iso(when)[:16])
                         if key in seen:
                             continue
                         seen.add(key)
-                        c.add("file_opened", f"{verb} {nm}",
-                              f"{user} opened {target or nm} from {where}."
-                              + (f" The volume there had serial number {vsn:08X}." if vsn and external else ""),
-                              to_iso(when), src, "Windows shortcut (LNK) in the Recent folder", path=str(f), detail=target,
+                        if first and updated:
+                            text = (f"{user} first opened an item named {nm}. Windows updated the shortcut on a later "
+                                    f"opening, so the location it records now ({target or 'unknown'}) is from the last time.")
+                        else:
+                            text = (f"{user} opened {target or nm} from {where}."
+                                    + (f" The volume there had serial number {vsn:08X}." if vsn and external else ""))
+                        c.add("file_opened", f"Opened {nm}" if first else f"Opened {nm} again",
+                              text, to_iso(when),
+                              "shortcut creation time: first time this item was opened" if first
+                              else "shortcut modification time: most recent time it was opened",
+                              "Windows shortcut (LNK) in the Recent folder", path=str(f), detail=target,
                               severity=2 if (external or ext in OFFICE_EXT) and not is_folder else 1,
                               tags=["lnk"] + (["external-volume"] if external else []) + (["folder"] if is_folder else []),
-                              entities=[dev] if dev else [],
+                              entities=[dev] if dev and not (first and updated) else [],
                               data={"name": nm, "target": target, "volume_serial": vsn, "drive_kind": DRIVE_KIND.get(kind),
                                     "share": share, "user": user})
                         n += 1
@@ -575,6 +638,15 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             if key in seen:
                 continue
             seen.add(key)
+            if "<CDBURN>" in loc:
+                c.add("cd_burned", f"Files staged for burning to disc in drive {loc[:2]}",
+                      f"Explorer showed the \"files ready to be written to the disc\" view for drive {loc[:2]}. "
+                      "Windows shows it when files are waiting to be burned.",
+                      to_iso(ts), "shellbag registry key time: when this view was last saved",
+                      "user registry hive: Shellbags", path=_s(_get(r, "regf_key_path")), detail=raw,
+                      severity=2, confidence=0.7, tags=["shellbag", "burn"], data={"name": "burn staging", "target": loc})
+                n += 1
+                continue
             c.add("file_opened", f"Browsed {loc}", f"The folder {loc} was open in Explorer.",
                   to_iso(ts), "shellbag registry key time: when this folder view was last saved",
                   "user registry hive: Shellbags", path=_s(_get(r, "regf_key_path")), detail=raw,
@@ -609,7 +681,9 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                         ("UPLOAD", "DELETE"): f"Deleted {name} from Google Drive",
                         ("UPLOAD", "MODIFY"): f"Updated {name} on Google Drive",
                         ("DOWNLOAD", "CREATE"): f"Google Drive synced {name} down to this computer",
-                        ("DOWNLOAD", "DELETE"): f"{name} was removed by a change made in the cloud"}.get(
+                        ("DOWNLOAD", "DELETE"): f"{name} was removed by a change made in the cloud",
+                        ("DOWNLOAD", "CHANGE_ACL"): f"Sharing changed for {name} on Google Drive",
+                        ("UPLOAD", "CHANGE_ACL"): f"Sharing changed for {name} on Google Drive"}.get(
                     (direction, action), f"Google Drive {action.lower()} {name}")
                 size = sizes.get(name)
                 c.add("cloud_activity", what,
@@ -617,7 +691,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                       f"{name}" + (f" ({size:,} bytes)." if size else "."),
                       to_iso(when), "Google Drive sync log line time (the log records its own UTC offset)",
                       "Google Drive sync_log.log", path=str(log_path), detail=line[:300],
-                      severity=3 if up and action in ("CREATE", "DELETE") else 1,
+                      severity=3 if (up and action in ("CREATE", "DELETE")) or action == "CHANGE_ACL" else 1,
                       tags=["cloud", "google-drive", direction.lower(), action.lower()],
                       entities=[Entity("program", "program:googledrive", "Google Drive")],
                       data={"service": "Google Drive", "name": name, "direction": direction, "action": action, "size": size})
@@ -625,7 +699,8 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
         return n
 
     def mail() -> int:
-        """Outlook mailboxes, read with libpff when it is installed."""
+        """Outlook mailboxes, read with libpff when it is installed. Also recovers messages that are gone
+        from the mailbox but still quoted inside later replies."""
         boxes = []
         for user, home in homes():
             for sub in ("AppData/Local/Microsoft/Outlook", "Documents/Outlook Files"):
@@ -642,10 +717,13 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                   "was not read (pip install libpff-python)")
             return 0
         n = 0
+        hot_re = re.compile(r"https?://|drive\.google|attach|sample|usb|\bcd\b|storage|done|secur|data|request", re.I)
         for user, box in boxes:
             owner = box.name.split("@")[0].split(".")[0].lower()
             pff = pypff.file()
             pff.open_file_object(box.open())
+            real: list[tuple[str, datetime]] = []              # (subject, time) of messages still in the mailbox
+            quoted: list[tuple[dict, str, str]] = []
 
             def walk(folder, name: str) -> None:
                 nonlocal n
@@ -656,8 +734,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                         sender = (m.sender_name or "").strip()
                         if "Sync Issues" in name or subject.startswith("Synchronization Log"):
                             continue
-                        body = _html_text(m.html_body) if m.html_body else _html_text(m.plain_text_body or b"")
-                        own = body.split(" From: ")[0].split("-----Original Message-----")[0].strip()
+                        own, quotes = split_quotes(_text_lines(m.html_body or m.plain_text_body or b""))
                         headers = m.transport_headers or ""
                         to = re.search(r"^To: (.*)$", headers, re.M)
                         frm = re.search(r"^From: (.*)$", headers, re.M)
@@ -665,18 +742,19 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                         when = (m.client_submit_time if sent else m.delivery_time) or m.delivery_time or m.client_submit_time
                         if not when:
                             continue
-                        hot = bool(re.search(r"https?://|drive\.google|attach|usb|cd|done|secur|data|request", body, re.I))
+                        real.append((subject.lower(), _t(to_iso(when))))
+                        quoted.extend((q, subject, name) for q in quotes)
                         c.add("email", (f'Email sent: "{subject}"' if sent else f'Email from {sender}: "{subject}"'),
                               (f'{"Sent by" if sent else "Received from"} {sender}. Folder: {name}. '
-                               + (f"It says: \u201c{own[:260]}\u201d" if own else "The message has no text of its own.")),
+                               + (f"It says: “{own[:260]}”" if own else "The message has no text of its own.")),
                               to_iso(when), "message submit time" if sent else "message delivery time",
                               f"Outlook mailbox {box.name}", path=str(box), detail=f"folder {name}",
-                              severity=3 if hot else 2,
+                              severity=3 if hot_re.search(own) else 2,
                               tags=["email", "sent" if sent else "received"] + (["deleted-items"] if "deleted" in name.lower() else []),
                               entities=[Entity("person", f"person:{sender.lower()}", sender)] if sender else [],
-                              data={"subject": subject, "sender": sender, "folder": name, "body": body[:1200],
+                              data={"subject": subject, "sender": sender, "folder": name, "body": own[:1200],
                                     "from": frm.group(1).strip() if frm else "", "to": to.group(1).strip() if to else "",
-                                    "attachments": getattr(m, "number_of_attachments", 0)})
+                                    "quotes": len(quotes)})
                         n += 1
                     except Exception as exc:
                         c.dropped[f"unreadable messages ({type(exc).__name__})"] += 1
@@ -685,14 +763,41 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                     walk(sub, sub.name or "folder")
 
             walk(pff.get_root_folder(), "root")
+            # Messages that only survive as quotes inside later replies.
+            seen_q = set()
+            for q, inside, folder_name in quoted:
+                iso = case.local_to_iso(q["sent_local"])
+                key = (q["subject"].lower(), iso[:16], q["from"].lower())
+                still_there = any(sub == q["subject"].lower() and abs((when - _t(iso)).total_seconds()) <= 180
+                                  for sub, when in real)
+                if key in seen_q or still_there:
+                    continue
+                seen_q.add(key)
+                c.add("email", f'Email by {q["from"]}, recovered from a quote: "{q["subject"]}"',
+                      (f'{q["from"]} wrote to {q["to"] or "the recipient"} at {q["sent_local"]:%H:%M} local time: '
+                       f'“{q["body"][:260]}” This message is no longer in the mailbox. Its text survives because '
+                       f'the later message "{inside}" quotes it.'),
+                      iso, "sent time printed in the quoted header (local time, to the minute)",
+                      f"Outlook mailbox {box.name}", path=str(box), detail=f'quoted inside "{inside}" in {folder_name}',
+                      severity=3 if hot_re.search(q["body"]) else 2, confidence=0.8,
+                      tags=["email", "quoted", "sent" if q["from"].lower() == owner else "received"],
+                      entities=[Entity("person", f"person:{q['from'].lower()}", q["from"])],
+                      data={"subject": q["subject"], "sender": q["from"], "to": q["to"], "body": q["body"][:1200],
+                            "quoted_in": inside})
+                n += 1
         return n
 
     def usn_records():
-        """Yield (segment, time, reason, name, full_path_getter) for rename and delete records.
+        """Yield (segment, time, reason, name, full_path_getter) for the journal records that matter.
 
         Reads the journal directly and resolves a full path only when asked,
         which is far faster than resolving every record.
         """
+        def wanted(reason: str, name: str) -> bool:
+            if "RENAME" in reason or "FILE_DELETE" in reason:
+                return True
+            return "FILE_CREATE" in reason and extension_of(name) in OFFICE_EXT and not name.startswith(("~", "$"))
+
         try:
             from dissect.ntfs.util import segment_reference
             seen_fs = False
@@ -703,7 +808,8 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                 for rec in fs.ntfs.usnjrnl.records():
                     reason = str(rec.Reason).upper()
                     usn_total[0] += 1
-                    if "RENAME" not in reason and "FILE_DELETE" not in reason:
+                    name = rec.filename or ""
+                    if not wanted(reason, name):
                         continue
                     try:
                         ts = rec.timestamp
@@ -711,7 +817,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                         continue
                     ref = rec.record.FileReferenceNumber
                     seg = f"{segment_reference(ref)}#{ref.SequenceNumber}"
-                    yield seg, ts, reason, rec.filename or "", (lambda r=rec: _s(r.full_path))
+                    yield seg, ts, reason, name, (lambda r=rec: _safe_path(r))
             if seen_fs:
                 return
         except Exception as exc:
@@ -720,62 +826,121 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             usn_total[0] += 1
             reason = _s(_get(r, "reason")).upper()
             ts = _get(r, "ts")
-            if not ts or ("RENAME" not in reason and "FILE_DELETE" not in reason):
-                continue
             path = _s(_get(r, "path"))
+            if not ts or not wanted(reason, _name(path)):
+                continue
             yield _s(_get(r, "segment_id")), ts, reason, _name(path), (lambda p=path: p)
+
+    def _safe_path(rec) -> str:
+        try:
+            return _s(rec.full_path).replace("/", "\\")
+        except Exception:
+            return ""
 
     usn_total = [0]
 
     def usn() -> int:
-        """Renames that change the extension, and the overwrite pattern of secure erasers."""
+        """What the NTFS change journal remembers: documents arriving, disguising renames,
+        moves to the Recycle Bin, deletions and the burst pattern of a secure eraser."""
         n = 0
         pending: dict[str, tuple[str, Any]] = {}
-        renames: dict[str, list[tuple[Any, str, str, Any]]] = defaultdict(list)   # ts, old, new, path getter
-        deleted_at: dict[str, Any] = {}
+        renames: dict[str, list] = defaultdict(list)          # ts, old, new, new path getter, old path getter
+        created: dict[str, tuple] = {}
+        deleted: dict[str, tuple] = {}
         for seg, ts, reason, name, get_path in usn_records():
             if "RENAME_OLD_NAME" in reason:
                 pending[seg] = (name, get_path)
-            elif "RENAME_NEW_NAME" in reason and seg in pending:
-                old, old_path = pending.pop(seg)
-                renames[seg].append((ts, old, name, get_path, old_path))
+            elif "RENAME_NEW_NAME" in reason:
+                if seg in pending:
+                    old, old_path = pending.pop(seg)
+                    renames[seg].append((ts, old, name, get_path, old_path))
             elif "FILE_DELETE" in reason:
-                deleted_at[seg] = ts
+                deleted[seg] = (ts, name, get_path)
+            elif "FILE_CREATE" in reason:
+                created.setdefault(seg, (ts, name, get_path))
+
+        def folder_of(path: str) -> str:
+            return path.rsplit("\\", 1)[0] if "\\" in path else ""
+
+        tracked: dict[str, str] = {}                           # segment -> how to describe the file when it is deleted
+        for seg, (ts, name, get_path) in created.items():
+            where = get_path()
+            c.add("file_created", f"{name} appeared on the computer",
+                  f"A new file named {name} was created" + (f" in {folder_of(where)}" if folder_of(where) else "")
+                  + ". For a document that already exists elsewhere, this is the moment it was copied here.",
+                  to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=where or name,
+                  severity=2, tags=["journal", "created"], data={"name": name, "path": where})
+            tracked[seg] = name
+            n += 1
+
         for seg, items in renames.items():
-            first_old = items[0][1]
-            span = items[-1][0] - items[0][0]
-            dele = deleted_at.get(seg)
-            # A secure eraser renames the file several times, in a burst, to random names as long as the original.
-            scrambled = sum(1 for x in items if len(x[2]) == len(first_old) and x[2] != first_old)
-            if (len(items) >= 5 and span <= timedelta(seconds=20) and scrambled >= 0.8 * len(items)
-                    and dele and dele - items[-1][0] <= timedelta(minutes=10)):
-                where = items[0][4]().replace("/", "\\")
-                c.add("file_wiped", f"{first_old} was overwritten and deleted",
-                      f"{where or first_old} was renamed {len(items)} times to meaningless names within "
-                      f"{int(span.total_seconds())} seconds and then deleted. Secure erasers do this to hide "
-                      "the file name after overwriting the content.",
-                      to_iso(items[0][0]), "NTFS change journal record time", "$UsnJrnl:$J",
-                      path=where or first_old, detail=" > ".join(x[2] for x in items[:8]),
-                      severity=3, tags=["wiped", "anti-forensics"], time_end=to_iso(dele),
-                      data={"name": first_old, "path": where, "renames": len(items)})
-                n += 1
-                continue
-            for ts, old, new, get_path, _ in items:
+            rest = []
+            i = 0
+            while i < len(items):
+                # A secure eraser renames the file several times in one burst, to random names as long as the original.
+                j = i
+                while j + 1 < len(items) and items[j + 1][0] - items[i][0] <= timedelta(seconds=20):
+                    j += 1
+                run = items[i: j + 1]
+                first_old = run[0][1]
+                scrambled = sum(1 for x in run if len(x[2]) == len(first_old) and x[2] != first_old)
+                gone = deleted.get(seg)
+                if len(run) >= 5 and scrambled >= 0.8 * len(run) and gone and timedelta(0) <= gone[0] - run[-1][0] <= timedelta(minutes=10):
+                    where = run[0][4]() or first_old
+                    c.add("file_wiped", f"{first_old} was overwritten and deleted",
+                          f"{where} was renamed {len(run)} times in one burst to meaningless names such as "
+                          f"\"{run[0][2]}\", and then deleted. A secure eraser does this to destroy the file name "
+                          "after overwriting the content.",
+                          to_iso(run[0][0]), "NTFS change journal record time", "$UsnJrnl:$J",
+                          path=where, detail=" > ".join(x[2] for x in run[:8]),
+                          severity=3, tags=["wiped", "anti-forensics"], time_end=to_iso(gone[0]),
+                          data={"name": first_old, "path": where, "renames": len(run)})
+                    n += 1
+                    deleted.pop(seg, None)
+                    i = j + 1
+                    continue
+                rest.append(items[i])
+                i += 1
+            for ts, old, new, get_path, old_path in rest:
                 eo, en = extension_of(old), extension_of(new)
+                if re.match(r"^\$R[0-9A-Z]{6}(\.|$)", new):       # Explorer renames a deleted item to $R... in the Recycle Bin
+                    was = old_path() or old
+                    c.add("recycle_bin", f"{old} sent to the Recycle Bin",
+                          f"{was} was deleted to the Recycle Bin. The bin was emptied later, but the change journal "
+                          f"still records the move (as {new}).",
+                          to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=was, detail=f"renamed to {new}",
+                          severity=2, tags=["deleted", "journal"], data={"name": old, "original_path": was})
+                    tracked[seg] = old
+                    n += 1
+                    continue
                 if old.startswith(("~", "$")) or new.startswith(("~", "$")):
                     c.dropped["temporary-file renames by Office"] += 1
                     continue
                 if eo == en or not (eo in OFFICE_EXT or en in OFFICE_EXT):
                     c.dropped["ordinary renames"] += 1
                     continue
-                where = get_path().replace("/", "\\")
+                where = get_path()
                 c.add("file_renamed", f"Renamed {old} to {new}",
-                      f"{old} was renamed to {new} in {where.rsplit(chr(92), 1)[0] or 'its folder'}. "
-                      f"The extension changed from .{eo or '(none)'} to .{en or '(none)'}.",
-                      to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=where, detail=f"was {old}",
+                      f"{old} was renamed to {new}" + (f" in {folder_of(where)}" if folder_of(where) else "")
+                      + f". The extension changed from .{eo or '(none)'} to .{en or '(none)'}.",
+                      to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=where or new, detail=f"was {old}",
                       severity=3 if eo in OFFICE_EXT else 2, tags=["rename", "extension-change"],
                       data={"old_name": old, "new_name": new, "new_path": where, "name": new})
+                tracked[seg] = f"{new} (originally {old})" if eo in OFFICE_EXT else new
                 n += 1
+
+        for seg, (ts, name, get_path) in deleted.items():
+            if seg not in tracked:
+                continue
+            if name.startswith("$R"):
+                continue                                           # emptied from the Recycle Bin: already reported
+            where = get_path()
+            c.add("file_deleted", f"{name} deleted from the computer",
+                  f"{tracked[seg]} was deleted" + (f" from {folder_of(where)}" if folder_of(where) else "")
+                  + ". It did not go through the Recycle Bin.",
+                  to_iso(ts), "NTFS change journal record time", "$UsnJrnl:$J", path=where or name,
+                  severity=2, tags=["journal", "deleted"], data={"name": name, "path": where, "was": tracked[seg]})
+            n += 1
         c.log(f"{image.label}: change journal: read {usn_total[0]} records")
         return n
 
