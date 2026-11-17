@@ -27,6 +27,7 @@ KIND_LANE = {
     "file_copied": "files",
     "file_renamed": "files",
     "file_opened": "files",
+    "folder_browsed": "files",
     "file_listed": "files",
     "deleted_file_recovered": "files",
     "carved_file": "files",

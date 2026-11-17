@@ -22,7 +22,7 @@ PHASES = ["preparation", "collection", "exfiltration", "cover-up", "context"]
 
 _PHASE = {
     "web_search": "preparation", "web_visit": "preparation", "program_installed": "preparation",
-    "usb_connected": "collection", "file_opened": "collection", "file_copied": "collection",
+    "usb_connected": "collection", "file_opened": "collection", "folder_browsed": "collection", "file_copied": "collection",
     "file_created": "collection", "file_listed": "collection",
     "deleted_file_recovered": "exfiltration", "carved_file": "exfiltration", "cd_burned": "exfiltration",
     "cloud_activity": "exfiltration", "email": "exfiltration", "web_download": "preparation",
@@ -62,6 +62,24 @@ def _names(items: list[dict], limit: int = 3) -> str:
     return ", ".join(names[:limit]) + (f" and {more} more" if more > 0 else "")
 
 
+def _common_folder(paths: list[str]) -> str:
+    """The deepest folder all the paths share."""
+    parts = [p.replace("/", "\\").split("\\")[:-1] for p in paths if p]
+    if not parts:
+        return ""
+    common = parts[0]
+    for other in parts[1:]:
+        k = 0
+        while k < min(len(common), len(other)) and common[k].lower() == other[k].lower():
+            k += 1
+        common = common[:k]
+    return "\\".join(common)
+
+
+# Kinds where every finding is its own moment in the story.
+SOLO = {"email", "cd_burned", "usb_connected", "volume_formatted", "program_uninstalled"}
+
+
 def _beat_text(case: Case, kind: str, dev: Optional[dict], items: list[dict]) -> tuple[str, str]:
     n = len(items)
     where = dev["label"] if dev else "the computer"
@@ -85,11 +103,17 @@ def _beat_text(case: Case, kind: str, dev: Optional[dict], items: list[dict]) ->
                 f"{n} files on {where} carry false extensions ({mix}): {_names(items)}.")
     if kind == "file_renamed":
         ex = items[0]["data"]
+        pairs = "; ".join(f"{f['data'].get('old_name')} to {f['data'].get('new_name')}" for f in items[:5])
+        if not any("extension-change" in f.get("tags", []) for f in items):
+            what = "folder" if all(f["data"].get("is_dir") for f in items) else "item"
+            return (f"{n} {what}{'s' if n != 1 else ''} renamed on {where}",
+                    f"{when}, {n} {what}{'s' if n != 1 else ''} on {where} {'were' if n != 1 else 'was'} renamed: {pairs}"
+                    + (f" and {n - 5} more." if n > 5 else "."))
         return (f"{n} file{'s' if n != 1 else ''} renamed to hide what they are",
                 f"{when}, {n} document{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} renamed to unrelated names and extensions, for example "
                 f"{ex.get('old_name')} became {ex.get('new_name')}.")
     if kind == "volume_formatted":
-        return (f"{where} was quick-formatted", items[0]["summary"])
+        return (items[0]["title"], items[0]["summary"])
     if kind == "usb_connected":
         return (items[0]["title"], items[0]["summary"])
     if kind == "web_search":
@@ -112,10 +136,37 @@ def _beat_text(case: Case, kind: str, dev: Optional[dict], items: list[dict]) ->
         return (f"{n} item{'s' if n != 1 else ''} sent to the Recycle Bin",
                 f"{when}, {n} item{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} deleted to the Recycle Bin: {_names(items)}.")
     if kind == "file_deleted":
-        return (f"{n} file{'s' if n != 1 else ''} deleted on {where}",
-                f"{n} files were removed from view on {where}: {_names(items)}.")
+        if any("journal" in f.get("tags", []) for f in items):
+            folder = _common_folder([f["data"].get("path", "") for f in items])
+            return (f"{n} file{'s' if n != 1 else ''} deleted from the computer",
+                    f"{when}, {n} file{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} deleted"
+                    + (f" from {folder}" if folder else "") + f" without going through the Recycle Bin: {_names(items, 4)}.")
+        if any("stale-entry" in f.get("tags", []) for f in items):
+            return (f"{n} more file name{'s' if n != 1 else ''} once on {where}",
+                    f"Old directory entries name {n} files that were once on {where} and could not be recovered: {_names(items)}.")
+        return (f"{n} file{'s' if n != 1 else ''} removed from {where}",
+                f"{when}, {n} file{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} removed from the directory of {where}: "
+                f"{_names(items)}. The content stayed on the medium.")
+    if kind == "file_created":
+        folder = _common_folder([f["data"].get("path", "") for f in items])
+        return (f"{n} document{'s' if n != 1 else ''} copied onto the computer",
+                f"{when}, {n} document{'s' if n != 1 else ''} appeared" + (f" in {folder}" if folder else " on the computer")
+                + f": {_names(items, 4)}.")
     if kind == "file_opened":
-        return (f"{n} file{'s' if n != 1 else ''} opened", f"{when} the user opened: {_names(items, 4)}.")
+        key = [f for f in items if f["severity"] >= 2] or items
+        k = len(key)
+        return (f"Opened {_names(key, 2)}" if k <= 2 else f"{k} files opened",
+                f"{when} the user opened: {_names(key, 5)}.")
+    if kind == "folder_browsed":
+        root = _common_folder([f["data"].get("target", "") + "\\x" for f in items]) or items[0]["data"].get("target", "")
+        return (f"Browsed {root}" if n == 1 else f"Browsed {n} folders under {root}",
+                f"{when} the user browsed in Explorer: " + "; ".join(dict.fromkeys(f["data"].get("target", "") for f in items[:5]))
+                + (f" and {n - 5} more." if n > 5 else "."))
+    if kind == "web_visit":
+        hosts = list(dict.fromkeys((f["data"].get("url", "").split("/")[2] if "//" in f["data"].get("url", "") else f["title"])
+                                   for f in items))
+        return (f"{n} page{'s' if n != 1 else ''} visited", f"{when} the user visited: " + ", ".join(hosts[:5])
+                + (f" and {len(hosts) - 5} more sites." if len(hosts) > 5 else "."))
     if kind == "program_installed":
         return (f"Installed {_names(items)}", f"{when}: {_names(items, 5)} installed.")
     if kind == "program_executed":
@@ -220,7 +271,7 @@ def build(case: Case, store: CaseStore) -> dict[str, Any]:
             continue
         dev = _device(f)
         key = (f["kind"], dev["id"] if dev else None)
-        b = open_beats.get(key)
+        b = None if f["kind"] in SOLO else open_beats.get(key)
         if b and _t(f["time"]) - _t(b["_last"]) <= GAP:
             b["_items"].append(f)
             b["_last"] = f["time"]
@@ -329,6 +380,8 @@ def narrative(timeline: dict) -> str:
     lines = [f"# {case['name']}: what happened, in order", ""]
     beats = {b["id"]: b for b in timeline["beats"]}
     for act in timeline["acts"]:
+        if not any(beats[bid]["severity"] >= 2 for bid in act["beats"]):
+            continue
         lines.append(f"## {act['label']}")
         for bid in act["beats"]:
             b = beats[bid]

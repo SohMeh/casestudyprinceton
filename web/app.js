@@ -7,7 +7,8 @@ const LANE_NAME = { communication: "Messages", web: "Web", devices: "Devices", f
 const KIND_NAME = { deleted_file_recovered: "Deleted file recovered", carved_file: "File carved from raw data",
   disguised_file: "File under a false name", volume_formatted: "Volume formatted", wiping_tool: "Wiping tool",
   file_wiped: "File securely wiped", file_renamed: "File renamed", file_listed: "File on the device",
-  file_opened: "File opened", file_deleted: "File removed", recycle_bin: "Recycle Bin", web_search: "Web search",
+  file_opened: "File opened", folder_browsed: "Folder browsed", file_created: "File copied onto the computer",
+  file_deleted: "File removed", recycle_bin: "Recycle Bin", web_search: "Web search",
   web_visit: "Web visit", web_download: "Download", usb_connected: "Device connected",
   program_installed: "Program installed", program_executed: "Program run", program_uninstalled: "Program removed",
   cloud_activity: "Cloud storage", evidence_link: "Same content, different place", system_info: "Evidence intake",
@@ -460,7 +461,7 @@ function renderExhibit() {
       <p class="sum">${j.true_type || "File"}${j.inner_title ? `. Inside, it reads: “${h(j.inner_title.slice(0, 110))}”` : ""}. Seen on ${j.devices.length} device${j.devices.length === 1 ? "" : "s"}${fake.length && j.true_name ? ` and under ${fake.length} false name${fake.length === 1 ? "" : "s"}: ${fake.map(h).join(", ")}` : ""}.</p>
       <dl class="facts"><dt>Matched by</dt><dd>${j.link ? "identical content (hash)" : "single copy"}</dd><dt>sha-256</dt><dd><span style="font-family:var(--mono);font-size:11.5px">${j.sha256}</span></dd></dl>
       <h4>Sightings, in time order</h4><ul class="members">${j.sightings.map((x) => `<li data-f="${x.finding}"><i style="background:${x.disguised ? laneColor("coverup") : laneColor("files")}"></i>
-        <span>${h(x.device)}: ${h(x.named ? x.name : "unnamed copy")}<small>${x.state === "live" ? "still on the device" : x.state === "carved" ? "carved from raw data" : "deleted, recovered"}${x.disguised ? " · false name" : ""} · ${when(x.time)}</small></span></li>`).join("")}</ul>`;
+        <span>${h(x.device)}: ${h(x.named ? x.name : "unnamed copy")}<small>${x.state === "live" ? "still on the device" : x.state === "carved" ? "carved from raw data" : x.state === "renamed" ? `renamed here from ${h(x.was)}` : "deleted, recovered"}${x.disguised && x.state !== "renamed" ? ", false name" : ""}, ${when(x.time)}</small></span></li>`).join("")}</ul>`;
   } else if (s?.ref) {
     const e = tl.reference.events.find((x) => x.id === s.ref), hit = tl.score?.matches?.[e.id];
     el.innerHTML = `<div class="kicker">Answer key · ${h(tl.reference.name)}</div><h3>${h(e.title)}</h3>
@@ -501,7 +502,7 @@ async function renderTab() {
     const js = tl.journeys.filter((j) => j.notable);
     el.innerHTML = js.length ? `<table><thead><tr><th>Document</th><th>Really is</th><th>Where it went</th></tr></thead><tbody>${js.map((j) => `
       <tr class="pick ${S.journey?.id === j.id ? "cur" : ""}" data-journey="${j.id}"><td><b>${h(j.label)}</b>${j.inner_title && !j.true_name ? `<br><span class="muted">“${h(j.inner_title.slice(0, 70))}”</span>` : ""}</td>
-      <td>${h(j.true_type || "")}</td><td><span class="path">${j.sightings.map((s) => `<span class="stop ${s.state} ${s.disguised ? "false" : ""}">${h(s.device)} <small>${h(s.named ? s.name : "unnamed")}${s.state === "live" ? "" : s.state === "carved" ? ", carved" : ", deleted"}</small></span>`).join('<span class="arrow">then</span>')}</span></td></tr>`).join("")}</tbody></table>
+      <td>${h(j.true_type || "")}</td><td><span class="path">${j.sightings.map((s) => `<span class="stop ${s.state} ${s.disguised ? "false" : ""}">${h(s.device)} <small>${h(s.named ? s.name : "unnamed")}${s.state === "live" ? "" : s.state === "carved" ? ", carved" : s.state === "renamed" ? ", renamed" : ", deleted"}</small></span>`).join('<span class="arrow">then</span>')}</span></td></tr>`).join("")}</tbody></table>
       <p class="muted" style="margin-top:10px">Dashed boxes were deleted or carved back. A red outline marks a false name. Pick a row to draw the file's thread on the timeline.</p>`
       : `<p class="muted">No files have been traced yet. Send the intake, recovery and disguise agents.</p>`;
   } else if (S.tab === "points") {

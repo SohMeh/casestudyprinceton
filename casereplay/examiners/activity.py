@@ -108,7 +108,7 @@ class _Collector:
             entities: Iterable[Entity] = (), time_end: Optional[str] = None) -> Finding:
         f = Finding(
             kind=kind, agent=AGENT, title=title[:160], summary=summary, time=time, time_end=time_end,
-            time_source=time_source, entities=[self.pc, *entities],
+            time_source=time_source, entities=[*entities, self.pc],      # the device the finding is about comes first
             evidence=[Evidence(image=self.image.name, source=source, path=path, detail=(detail or None))],
             confidence=confidence, severity=severity, tags=list(tags), data=data or {},
         )
@@ -417,7 +417,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                       f"Visited {cloud or urlparse(url).netloc}",
                       f"{_s(_get(r, 'title')) or url[:120]} was opened in {who or 'a browser'}.",
                       to_iso(ts), "browser history visit time", f"{who} history database",
-                      path=_s(_get(r, "source")), detail=url[:300], severity=2,
+                      path=_s(_get(r, "source")), detail=url[:300], severity=2 if (cloud or tool_match(low)) else 1,
                       tags=["visit", who] + (["cloud"] if cloud else []),
                       data={"url": url, "title": _s(_get(r, "title")), "browser": who, "service": cloud})
                 n += 1
@@ -647,7 +647,7 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                       severity=2, confidence=0.7, tags=["shellbag", "burn"], data={"name": "burn staging", "target": loc})
                 n += 1
                 continue
-            c.add("file_opened", f"Browsed {loc}", f"The folder {loc} was open in Explorer.",
+            c.add("folder_browsed", f"Browsed {loc}", f"The folder {loc} was open in Explorer.",
                   to_iso(ts), "shellbag registry key time: when this folder view was last saved",
                   "user registry hive: Shellbags", path=_s(_get(r, "regf_key_path")), detail=raw,
                   severity=2, confidence=0.75, tags=["shellbag", "folder"] + (["network"] if loc.startswith("\\\\") else []),
