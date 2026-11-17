@@ -192,6 +192,10 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
         except Exception as exc:  # keep going: a damaged volume is still evidence
             log(f"{image.label}: could not list {vol.fstype} volume ({exc})")
         vol.label = label
+        serial = None
+        if vol.fstype in ("FAT32", "EXFAT"):
+            fh.seek(vol.offset + (67 if vol.fstype == "FAT32" else 100))
+            serial = int.from_bytes(fh.read(4), "little") or None
         quoted = f' "{label}"' if label else ""
         log(f"{image.label}: {vol.fstype} volume{quoted}, {live} live files")
         findings.append(Finding(
@@ -199,10 +203,13 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
             title=f"{image.label}: {vol.fstype} volume" + (f' "{label}"' if label else ""),
             summary=(f"{image.label} holds a {vol.fstype} volume"
                      + (f' labelled "{label}"' if label else "")
-                     + f" at byte offset {vol.offset}. The file system shows {live} live files."),
+                     + f" at byte offset {vol.offset}"
+                     + (f", volume serial number {serial:08X}" if serial else "")
+                     + f". The file system shows {live} live files."),
             entities=[dev],
             evidence=[Evidence(image=image.name, source="volume boot record", offset=vol.offset, length=512)],
             confidence=1.0, severity=1, tags=["volume"],
-            data={"fstype": vol.fstype, "label": label, "offset": vol.offset, "size": vol.size, "live_files": live},
+            data={"fstype": vol.fstype, "label": label, "offset": vol.offset, "size": vol.size, "live_files": live,
+                  "volume_serial": serial},
         ))
     return findings

@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from .. import fat32
 from ..images import SubStream, find_volumes, open_image
 from ..ledger import Case, CaseStore, ImageRef
+from ..magic import sniff
 from ..models import Entity, Evidence, Finding, device_entity
 
 AGENT = "wiper"
@@ -51,7 +52,9 @@ def _format_check(case: Case, image: ImageRef, fh, vol, log: Log) -> list[Findin
     live = [e for e in v.walk_live()]
     live_dirs = {e.start_cluster for e in live if e.is_dir}
     orphans = [d for d in v.scan_orphan_directories() if d.cluster not in live_dirs]
-    lost_files = [e for e in v.iter_recoverable(orphans)]
+    # Count only entries whose content is still where the entry says. Entries left over from an even
+    # older format of the medium point elsewhere and say nothing about this format.
+    lost_files = [e for e in v.iter_recoverable(orphans) if sniff(v.read_file(e)) not in ("UNKNOWN", "EMPTY")]
     if not orphans or not lost_files:
         log(f"{image.label}: no sign of a format")
         return []

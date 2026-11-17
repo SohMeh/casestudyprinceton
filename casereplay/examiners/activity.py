@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from datetime import datetime, timedelta
+import html as htmllib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Iterable, Optional
 from urllib.parse import parse_qs, unquote_plus, urlparse
@@ -37,12 +38,21 @@ SEARCH_HOSTS = ("google.", "bing.com", "duckduckgo.com", "yahoo.", "ask.com", "b
 INTERESTING_VISIT = ("leak", "dlp", "forensic", "eraser", "ccleaner", "wipe", "shred", "delete", "recover",
                      "steganograph", "security checkpoint", "cd-r", "e-mail investigation", "cloud storage")
 BURNERS = ("imgburn", "cdburnerxp", "nero", "burn", "isoburn")
+HOT_SEARCH = ("leak", "confidential", "dlp", "drm", "forensic", "investigation", "artifact", "event log",
+              "cd burning", "external device", "anti-forensic", "antiforensic", "eraser", "ccleaner", "wipe",
+              "shred", "secure delete", "cloud", "google drive", "icloud", "tethering", "file sharing",
+              "security checkpoint", "steganograph", "without being", "monitor usb", "hide")
+UNINSTALLERS = ("uninst", "unins000", "unins001", "uninstall", "uninstaller")
+DRIVE_KIND = {2: "removable drive", 3: "fixed disk", 4: "network drive", 5: "CD or DVD drive"}
 NOISE_PROGRAMS = ("svchost", "dllhost", "conhost", "taskhost", "wmiprvse", "searchprotocolhost",
                   "searchfilterhost", "rundll32", "consent", "audiodg", "mscorsvw", "ngen", "wuauclt",
                   "trustedinstaller", "tiworker", "sppsvc", "msiexec", "logonui", "csrss", "lsass", "smss",
                   "wininit", "winlogon", "services", "spoolsv", "dwm", "taskeng", "userinit", "wermgr",
                   "werfault", "defrag", "slui", "verclsid", "makecab", "ielowutil", "wmiadap", "vssvc",
                   "sdclt", "unregmp2", "regsvr32", "mobsync", "oobe", "poqexec", "drvinst", "cmd", "net1")
+
+
+_t = datetime.fromisoformat
 
 
 def _s(value: Any) -> str:
@@ -134,6 +144,35 @@ def _usb_device_entity(case: Case, store: CaseStore, label: str, serial: str) ->
     return Entity("device", f"device:usb:{key}", f"USB device {label or serial}")
 
 
+def _html_text(raw: Any) -> str:
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", "replace")
+    text = re.sub(r"(?is)<(style|script).*?</\1>|<[^>]+>", " ", raw or "")
+    return re.sub(r"\s+", " ", htmllib.unescape(text)).strip()
+
+
+def _b(value: Any) -> str:
+    """Text from the bytes or little structs that link files use for strings."""
+    for _ in range(3):
+        if isinstance(value, bytes):
+            return value.split(b"\x00")[0].decode("cp1252", "replace")
+        if isinstance(value, str) or value is None:
+            return value or ""
+        inner = [getattr(value, a) for a in ("net_name", "device_name", "volume_label") if hasattr(value, a)]
+        value = inner[0] if inner else None
+    return ""
+
+
+def _image_volumes(case: Case, store: CaseStore) -> dict[str, dict]:
+    """Volume label and serial number of every image, as read by the intake agent."""
+    out: dict[str, dict] = {}
+    for f in store.load_findings(case.id):
+        d = f.get("data", {})
+        if f["kind"] == "system_info" and (d.get("label") or d.get("volume_serial")):
+            out[d.get("image_id")] = {"label": (d.get("label") or "").lower(), "vsn": d.get("volume_serial")}
+    return out
+
+
 # -- full disk image ---------------------------------------------------------
 
 def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list[Finding]:
@@ -142,6 +181,39 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
     c = _Collector(case, image, log)
     log(f"{image.label}: opening disk image (read-only)")
     t = Target.open(image.path)
+    volumes = _image_volumes(case, store)
+
+    def image_device(label: str = "", vsn: Optional[int] = None) -> Optional[Entity]:
+        """The evidence image a volume on this computer corresponds to, by serial number or label."""
+        for im in case.images:
+            v = volumes.get(im.id)
+            if v and ((vsn and v["vsn"] == vsn) or (label and v["label"] == label.lower())):
+                return device_entity(im.id, im.label)
+        return None
+
+    def case_time(dt) -> str:
+        return dt.astimezone(case.tz).strftime("%Y-%m-%d %H:%M:%S")
+
+    def homes() -> list:
+        out = []
+        for u in t.users():
+            home = _s(_get(u, "home"))
+            if "\\users\\" in home.lower():
+                for cand in (home, "sysvol/Users/" + home.rsplit("\\", 1)[-1]):
+                    try:
+                        path = t.fs.path(cand)
+                        if path.exists():
+                            out.append((_s(_get(u, "name")), path))
+                            break
+                    except Exception:
+                        continue
+        return out
+
+    def reg_keys(path: str) -> list:
+        try:
+            return list(t.registry.keys(path))
+        except Exception:
+            return []
 
     def system() -> int:
         host = _s(getattr(t, "hostname", ""))
@@ -168,25 +240,93 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
         return n
 
     def usb() -> int:
+        """USB storage history from the registry, the driver install log and the volume cache."""
         n = 0
+        devices: dict[str, dict] = {}
         for r in t.usb():
-            serial = _s(_get(r, "serial"))
-            label = _s(_get(r, "friendly_name", "product"))
-            vols = [_s(v) for v in (_get(r, "volumes", default=[]) or [])]
-            dev = _usb_device_entity(case, store, " ".join(vols) or label, serial)
-            base = {"serial": serial, "friendly_name": label, "vendor": _s(_get(r, "vendor")),
-                    "product": _s(_get(r, "product")), "volumes": vols,
-                    "mounts": [_s(m) for m in (_get(r, "mounts", default=[]) or [])]}
-            for field, what in (("first_insert", "first connected"), ("last_insert", "connected (most recent)"),
-                                ("last_removal", "removed (most recent)")):
-                ts = _get(r, field)
-                if not ts:
+            serial = _s(_get(r, "serial")).split("&")[0]
+            if serial:
+                devices.setdefault(serial, {"name": _s(_get(r, "friendly_name", "product")) or "USB storage device",
+                                            "first": set(), "last": set(), "path": ""})
+        for root in ("HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR", "HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB"):
+            for key in reg_keys(root):
+                for dev in key.subkeys():
+                    for ser in dev.subkeys():
+                        d = devices.get(ser.name.split("&")[0])
+                        if d is None:
+                            continue
+                        d["last"].add(ser.ts)
+                        d["path"] = d["path"] or f"{root}\\{dev.name}\\{ser.name}"
+                        for sub in ser.subkeys():
+                            if sub.name == "LogConf":
+                                d["first"].add(sub.ts)
+        try:                                              # first driver install, written in local time
+            lines = t.fs.path("sysvol/windows/inf/setupapi.dev.log").read_text(errors="replace").splitlines()
+            for i, line in enumerate(lines[:-1]):
+                m = re.search(r"Device Install \(Hardware initiated\) - USBSTOR\\[^\\]+\\([^\]&]+)", line)
+                tm = m and re.search(r"Section start (\d{4})/(\d\d)/(\d\d) (\d\d):(\d\d):(\d\d)", lines[i + 1])
+                if tm and m.group(1) in devices:
+                    devices[m.group(1)]["setupapi"] = datetime(*map(int, tm.groups()))
+        except Exception:
+            pass
+        # Volumes Windows saw on removable media: label and volume serial number, with the time first seen.
+        vols = []
+        for key in reg_keys("HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\EMDMgmt"):
+            for sub in key.subkeys():
+                m = re.match(r"^(.*)_(\d+)$", sub.name)
+                if m:
+                    head = m.group(1)
+                    label = head.split("__", 1)[1].lstrip("_") if "__" in head else head
+                    vols.append({"ts": sub.ts, "label": label, "vsn": int(m.group(2)), "key": sub.name})
+        vols = list({(v["label"], v["vsn"]): v for v in sorted(vols, key=lambda v: v["ts"])}.values())
+
+        for serial, d in devices.items():
+            first_reg = min(d["first"]) if d["first"] else None
+            first = case.local_to_iso(d["setupapi"]) if d.get("setupapi") else to_iso(first_reg)
+            src = ("setupapi.dev.log section start (local time), confirmed by the USBSTOR LogConf key time"
+                   if d.get("setupapi") and first_reg else
+                   "setupapi.dev.log section start (local time)" if d.get("setupapi") else "USBSTOR LogConf key time")
+            anchor = first_reg or (_t(first) if first else None)
+            near = [v for v in vols if anchor and abs((v["ts"] - anchor).total_seconds()) <= 30]
+            label = near[0]["label"] if near else ""
+            d["label"] = label
+            dev = (image_device(label, near[0]["vsn"]) if near else None) or \
+                Entity("device", f"device:usb:{serial}", f"USB device {label or d['name']} ({serial[-4:]})")
+            vol_text = f' Windows mounted it as volume "{label}".' if label else ""
+            base = {"serial": serial, "friendly_name": d["name"], "volume_label": label,
+                    "volume_serial": near[0]["vsn"] if near else None}
+            times = []
+            if first:
+                times.append((first, "first_insert", "connected for the first time", src))
+            for ts in sorted(d["last"]):
+                iso = to_iso(ts)
+                if all(abs((_t(iso) - _t(x[0])).total_seconds()) > 30 for x in times):
+                    times.append((iso, "last_insert", "connected again", "USB device registry key last-write time"))
+            for iso, event, what, source in times:
+                c.add("usb_connected", f"{dev.label} {what}",
+                      f"{d['name']} with serial {serial} was {what} on this computer.{vol_text}",
+                      iso, source, "SYSTEM registry hive: Enum\\USBSTOR and Enum\\USB", path=d["path"],
+                      detail=f"serial {serial}", severity=2, tags=["usb", event], entities=[dev],
+                      data={**base, "event": event})
+                n += 1
+        # The same label coming back with a new serial number means the volume was formatted in between.
+        by_label: dict[str, list] = defaultdict(list)
+        for v in vols:
+            by_label[v["label"]].append(v)
+        for label, vs in by_label.items():
+            for before, after in zip(vs, vs[1:]):
+                if not label or not any(d.get("label") == label for d in devices.values()):
                     continue
-                c.add("usb_connected", f"USB device {label or serial} {what}",
-                      f"{label} (serial {serial}) was {what}. Volume names: {', '.join(vols) or 'not recorded'}.",
-                      to_iso(ts), f"USBSTOR registry: {field}", "SYSTEM registry hive: USBSTOR",
-                      path=_s(_get(r, "source")), detail=f"serial {serial}", severity=2,
-                      tags=["usb", field], entities=[dev], data={**base, "event": field})
+                dev = image_device(label, after["vsn"]) or Entity("device", f"device:volume:{label}", f'Volume "{label}"')
+                c.add("volume_formatted", f'Volume "{label}" came back with a new serial number',
+                      f'Windows first saw the volume "{label}" with serial number {before["vsn"]:08X} and later, at '
+                      f'{case_time(after["ts"])} local time, with serial number {after["vsn"]:08X}. A volume only '
+                      "gets a new serial number when it is formatted, so it was formatted shortly before that moment.",
+                      to_iso(after["ts"]), "registry key time: first time Windows saw the reformatted volume",
+                      "SOFTWARE registry hive: EMDMgmt", path="HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\EMDMgmt",
+                      detail=f"{before['key']} then {after['key']}", severity=3, confidence=0.85,
+                      tags=["format", "anti-forensics", "seen-from-computer"], entities=[dev],
+                      data={"label": label, "old_serial": before["vsn"], "new_serial": after["vsn"]})
                 n += 1
         return n
 
@@ -207,11 +347,11 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                 if key in seen:
                     continue
                 seen.add(key)
-                hot = tool_match(q) or any(k in q.lower() for k in INTERESTING_VISIT)
+                hot = tool_match(q) or any(k in q.lower() for k in HOT_SEARCH)
                 c.add("web_search", f'Searched {engine} for "{q}"',
                       f'The user searched {engine} for "{q}" in {who or "a browser"}.',
                       to_iso(ts), "browser history visit time", f"{who} history database",
-                      path=_s(_get(r, "source")), detail=url[:300], severity=3 if hot else 2,
+                      path=_s(_get(r, "source")), detail=url[:300], severity=3 if hot else 1,
                       tags=["search", who], data={"query": q, "engine": engine, "url": url, "browser": who})
                 n += 1
             elif any(k in low for k in CLOUD) or tool_match(low) or any(k in low for k in INTERESTING_VISIT):
@@ -263,8 +403,23 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                 continue
             hot = tool_match(low)
             cloud = next((v for k, v in CLOUD.items() if k in low), None)
+            if stem in UNINSTALLERS:
+                linked = [_s(x) for x in (_get(r, "linkedfiles", default=[]) or [])]
+                prog = next((m.group(1) for x in linked
+                             for m in [re.search(r"\\PROGRAM FILES(?: \(X86\))?\\([^\\]+)\\", x, re.I)] if m), "")
+                ts0 = _get(r, "ts")
+                if prog and ts0 and ts0.year > 1990:
+                    c.add("program_uninstalled", f"Uninstalled {prog.title()}",
+                          f"The uninstaller in the {prog.title()} program folder was run, which removes the program.",
+                          to_iso(ts0), "Prefetch last-run time of the uninstaller", "Windows Prefetch",
+                          path=_s(_get(r, "prefetch")), detail=next((x for x in linked if prog in x), ""),
+                          severity=3 if tool_match(prog) else 2, tags=["prefetch", "uninstall"],
+                          entities=[Entity("program", f"program:{prog.lower()}", prog.title())],
+                          data={"name": prog.title()})
+                    n += 1
+                    continue
             for ts in times:
-                if not ts or (low, to_iso(ts)) in seen:
+                if not ts or ts.year < 1990 or (low, to_iso(ts)) in seen:
                     continue
                 seen.add((low, to_iso(ts)))
                 c.add("program_executed", f"Ran {exe}",
@@ -296,17 +451,21 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
 
     def applications() -> int:
         n = 0
+        seen = set()
         for r in t.applications():
             nm = _s(_get(r, "name"))
-            ts = _get(r, "ts_installed", "ts_modified", "ts")
-            if not nm:
+            if not nm or _s(_get(r, "type")) == "system" or nm in seen:
                 continue
-            hot = tool_match(nm)
-            cloud = next((v for k, v in CLOUD.items() if k in nm.lower().replace(" ", "")), None)
-            if not ts:
+            inst, mod = _get(r, "ts_installed"), _get(r, "ts_modified")
+            # The install date is often a bare day. The registry key time on that day is the precise moment.
+            ts = mod if (mod and (not inst or (inst.hour, inst.minute, inst.second) == (0, 0, 0))) else inst
+            if not ts or ts.year < 1990:
                 c.dropped["installed programs without an install time"] += 1
                 continue
-            c.add("program_installed", f"Installed {nm}", f"{nm} {_s(_get(r, 'version'))} was installed.",
+            seen.add(nm)
+            hot = tool_match(nm)
+            cloud = next((v for k, v in CLOUD.items() if k in nm.lower().replace(" ", "")), None)
+            c.add("program_installed", f"Installed {nm}", f"{nm} {_s(_get(r, 'version'))} was installed.".replace("  ", " "),
                   to_iso(ts), "Uninstall registry key time", "SOFTWARE registry hive: Uninstall",
                   path=_s(_get(r, "path")), severity=3 if hot else (2 if cloud else 1),
                   tags=["install"] + (["cloud"] if cloud else []),
@@ -329,32 +488,203 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             n += 1
         return n
 
-    def lnk() -> int:
+    def links() -> int:
+        """Recently opened files: Windows writes a shortcut the first time, and updates it each time after."""
+        try:
+            from dissect.shellitem.lnk import Lnk
+        except Exception:
+            Lnk = None
+            c.log(f"{image.label}: dissect.shellitem is not installed, shortcut targets are read from file names only")
         n = 0
         seen = set()
-        for r in t.lnk():
-            target = _s(_get(r, "lnk_full_path", "local_base_path", "lnk_net_name", "lnk_relativepath"))
-            ts = _get(r, "lnk_mtime", "lnk_ctime")
-            if not target or not ts:
+        for user, home in homes():
+            for sub in ("AppData/Roaming/Microsoft/Windows/Recent", "AppData/Roaming/Microsoft/Office/Recent"):
+                folder = home.joinpath(sub)
+                try:
+                    files = [f for f in folder.iterdir() if f.name.lower().endswith(".lnk")]
+                except Exception:
+                    continue
+                for f in sorted(files, key=lambda x: x.name.lower()):
+                    st = f.stat()
+                    born = datetime.fromtimestamp(getattr(st, "st_birthtime", None) or st.st_ctime, timezone.utc)
+                    changed = datetime.fromtimestamp(st.st_mtime, timezone.utc)
+                    target, kind, vsn, vlabel, share = "", None, None, "", ""
+                    if Lnk:
+                        try:
+                            li = Lnk(f.open()).linkinfo
+                            target = _b(getattr(li, "local_base_path", None))
+                            net = getattr(li, "common_network_relative_link", None)
+                            share = _b(getattr(net, "net_name", None)) if net is not None else ""
+                            letter = _b(getattr(net, "device_name", None)) if net is not None else ""
+                            if not target and share:
+                                target = share + "\\" + _b(getattr(li, "common_path_suffix", None))
+                                kind = 4
+                                share = f"{share} ({letter})" if letter else share
+                            vol = getattr(li, "volumeid", None)
+                            if vol is not None and not share:
+                                kind = getattr(vol, "drive_type", None)
+                                vsn = getattr(vol, "drive_serial_number", None)
+                                vlabel = _b(getattr(vol, "volume_label", None))
+                        except Exception:
+                            pass
+                    nm = _name(target) or f.name[:-4]
+                    is_folder = "." not in nm[-6:]
+                    where = (f"the network share {share}" if share else
+                             f"the {DRIVE_KIND.get(kind, 'drive')} {target[:2]}" if target[1:2] == ":" else "an unknown location")
+                    external = bool(share) or (target[1:2] == ":" and kind not in (None, 3))
+                    dev = image_device(vlabel, vsn) if vsn and kind != 3 else None
+                    ext = extension_of(nm)
+                    for when, verb, src in ((born, "Opened", "shortcut creation time: first time this item was opened"),
+                                            (changed, "Opened again:", "shortcut modification time: most recent time it was opened")):
+                        if verb != "Opened" and (changed - born).total_seconds() < 60:
+                            continue
+                        key = (nm.lower(), to_iso(when)[:16])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        c.add("file_opened", f"{verb} {nm}",
+                              f"{user} opened {target or nm} from {where}."
+                              + (f" The volume there had serial number {vsn:08X}." if vsn and external else ""),
+                              to_iso(when), src, "Windows shortcut (LNK) in the Recent folder", path=str(f), detail=target,
+                              severity=2 if (external or ext in OFFICE_EXT) and not is_folder else 1,
+                              tags=["lnk"] + (["external-volume"] if external else []) + (["folder"] if is_folder else []),
+                              entities=[dev] if dev else [],
+                              data={"name": nm, "target": target, "volume_serial": vsn, "drive_kind": DRIVE_KIND.get(kind),
+                                    "share": share, "user": user})
+                        n += 1
+        return n
+
+    def shellbags() -> int:
+        """Folders the user browsed in Explorer on network shares and non-system drives."""
+        n = 0
+        seen = set()
+        for r in t.shellbags():
+            raw, ts = _s(_get(r, "path")), _get(r, "regf_mtime")
+            if not raw or not ts or "<UNKNOWN" in raw:
                 continue
-            nm = _name(target)
-            ext = extension_of(nm)
-            removable = not target.upper().startswith(("C:", "%"))
-            if ext not in OFFICE_EXT and not removable and ext not in EXT_EXPECT:
-                c.dropped["shortcuts to ordinary items"] += 1
+            clean = re.sub(r"<[A-Z_]+ \{\d+\}>\\?", "", raw)
+            m = re.match(r"^My Computer\\([A-Z]:\\.+)$", clean)
+            if m and m.group(1)[0] != "C":
+                loc = m.group(1)
+            elif clean.startswith("Network\\") and clean.count("\\") >= 2:
+                loc = "\\\\" + clean[len("Network\\"):]
+            else:
+                c.dropped["folder views on the system drive"] += 1
                 continue
-            key = (target.lower(), to_iso(ts))
+            key = (loc.lower(), to_iso(ts)[:16])
             if key in seen:
                 continue
             seen.add(key)
-            c.add("file_opened", f"Opened {nm or target}",
-                  f"{target} was opened. Windows recorded a shortcut to it.",
-                  to_iso(ts), "shortcut (LNK) modification time: last time the file was opened",
-                  "Windows shortcut file", path=_s(_get(r, "lnk_path")), detail=target,
-                  severity=2 if (removable or ext in OFFICE_EXT) else 1,
-                  tags=["lnk"] + (["external-volume"] if removable else []),
-                  data={"name": nm, "target": target, "volume": target[:2] if ":" in target[:3] else "network"})
+            c.add("file_opened", f"Browsed {loc}", f"The folder {loc} was open in Explorer.",
+                  to_iso(ts), "shellbag registry key time: when this folder view was last saved",
+                  "user registry hive: Shellbags", path=_s(_get(r, "regf_key_path")), detail=raw,
+                  severity=2, confidence=0.75, tags=["shellbag", "folder"] + (["network"] if loc.startswith("\\\\") else []),
+                  data={"name": loc.rstrip("\\").rsplit("\\", 1)[-1], "target": loc, "folder": True})
             n += 1
+        return n
+
+    def gdrive() -> int:
+        """Google Drive desktop client: what its sync log says was uploaded, downloaded and deleted."""
+        n = 0
+        line_re = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ ([+-]\d{4}) .*?Worker successfully completed "
+                             r"\[ImmutableChange\(Direction\.(\w+), Action\.(\w+)(.*)$")
+        for user, home in homes():
+            log_path = home.joinpath("AppData/Local/Google/Drive/user_default/sync_log.log")
+            try:
+                text = log_path.read_text(errors="replace")
+            except Exception:
+                continue
+            sizes = {_name(m.group(1).replace("\\\\", "\\")): int(m.group(2))
+                     for m in re.finditer(r"RawEvent\(\w+, path=u'([^']+)'.*?size=(\d+)", text)}
+            for line in text.splitlines():
+                m = line_re.match(line)
+                if not m:
+                    continue
+                stamp, zone, direction, action, rest = m.groups()
+                nm = re.search(r"name=(?:u'([^']+)'|([^,\]]+))", rest)
+                name = (nm.group(1) or nm.group(2)).strip() if nm else "an item"
+                when = datetime.strptime(f"{stamp} {zone}", "%Y-%m-%d %H:%M:%S %z")
+                up = direction == "UPLOAD"
+                what = {("UPLOAD", "CREATE"): f"Uploaded {name} to Google Drive",
+                        ("UPLOAD", "DELETE"): f"Deleted {name} from Google Drive",
+                        ("UPLOAD", "MODIFY"): f"Updated {name} on Google Drive",
+                        ("DOWNLOAD", "CREATE"): f"Google Drive synced {name} down to this computer",
+                        ("DOWNLOAD", "DELETE"): f"{name} was removed by a change made in the cloud"}.get(
+                    (direction, action), f"Google Drive {action.lower()} {name}")
+                size = sizes.get(name)
+                c.add("cloud_activity", what,
+                      f"The Google Drive client of {user} finished this change: {direction.lower()}, {action.lower()}, "
+                      f"{name}" + (f" ({size:,} bytes)." if size else "."),
+                      to_iso(when), "Google Drive sync log line time (the log records its own UTC offset)",
+                      "Google Drive sync_log.log", path=str(log_path), detail=line[:300],
+                      severity=3 if up and action in ("CREATE", "DELETE") else 1,
+                      tags=["cloud", "google-drive", direction.lower(), action.lower()],
+                      entities=[Entity("program", "program:googledrive", "Google Drive")],
+                      data={"service": "Google Drive", "name": name, "direction": direction, "action": action, "size": size})
+                n += 1
+        return n
+
+    def mail() -> int:
+        """Outlook mailboxes, read with libpff when it is installed."""
+        boxes = []
+        for user, home in homes():
+            for sub in ("AppData/Local/Microsoft/Outlook", "Documents/Outlook Files"):
+                try:
+                    boxes += [(user, f) for f in home.joinpath(sub).iterdir() if f.name.lower().endswith((".ost", ".pst"))]
+                except Exception:
+                    continue
+        if not boxes:
+            return 0
+        try:
+            import pypff
+        except Exception:
+            c.log(f"{image.label}: {len(boxes)} Outlook mailbox found, but libpff-python is not installed, so email "
+                  "was not read (pip install libpff-python)")
+            return 0
+        n = 0
+        for user, box in boxes:
+            owner = box.name.split("@")[0].split(".")[0].lower()
+            pff = pypff.file()
+            pff.open_file_object(box.open())
+
+            def walk(folder, name: str) -> None:
+                nonlocal n
+                for i in range(folder.number_of_sub_messages):
+                    try:
+                        m = folder.get_sub_message(i)
+                        subject = (m.subject or "").strip()
+                        sender = (m.sender_name or "").strip()
+                        if "Sync Issues" in name or subject.startswith("Synchronization Log"):
+                            continue
+                        body = _html_text(m.html_body) if m.html_body else _html_text(m.plain_text_body or b"")
+                        own = body.split(" From: ")[0].split("-----Original Message-----")[0].strip()
+                        headers = m.transport_headers or ""
+                        to = re.search(r"^To: (.*)$", headers, re.M)
+                        frm = re.search(r"^From: (.*)$", headers, re.M)
+                        sent = "sent" in name.lower() or sender.lower() == owner
+                        when = (m.client_submit_time if sent else m.delivery_time) or m.delivery_time or m.client_submit_time
+                        if not when:
+                            continue
+                        hot = bool(re.search(r"https?://|drive\.google|attach|usb|cd|done|secur|data|request", body, re.I))
+                        c.add("email", (f'Email sent: "{subject}"' if sent else f'Email from {sender}: "{subject}"'),
+                              (f'{"Sent by" if sent else "Received from"} {sender}. Folder: {name}. '
+                               + (f"It says: \u201c{own[:260]}\u201d" if own else "The message has no text of its own.")),
+                              to_iso(when), "message submit time" if sent else "message delivery time",
+                              f"Outlook mailbox {box.name}", path=str(box), detail=f"folder {name}",
+                              severity=3 if hot else 2,
+                              tags=["email", "sent" if sent else "received"] + (["deleted-items"] if "deleted" in name.lower() else []),
+                              entities=[Entity("person", f"person:{sender.lower()}", sender)] if sender else [],
+                              data={"subject": subject, "sender": sender, "folder": name, "body": body[:1200],
+                                    "from": frm.group(1).strip() if frm else "", "to": to.group(1).strip() if to else "",
+                                    "attachments": getattr(m, "number_of_attachments", 0)})
+                        n += 1
+                    except Exception as exc:
+                        c.dropped[f"unreadable messages ({type(exc).__name__})"] += 1
+                for i in range(folder.number_of_sub_folders):
+                    sub = folder.get_sub_folder(i)
+                    walk(sub, sub.name or "folder")
+
+            walk(pff.get_root_folder(), "root")
         return n
 
     def usn_records():
@@ -415,7 +745,10 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
             first_old = items[0][1]
             span = items[-1][0] - items[0][0]
             dele = deleted_at.get(seg)
-            if len(items) >= 3 and span <= timedelta(minutes=3) and dele and dele - items[-1][0] <= timedelta(minutes=3):
+            # A secure eraser renames the file several times, in a burst, to random names as long as the original.
+            scrambled = sum(1 for x in items if len(x[2]) == len(first_old) and x[2] != first_old)
+            if (len(items) >= 5 and span <= timedelta(seconds=20) and scrambled >= 0.8 * len(items)
+                    and dele and dele - items[-1][0] <= timedelta(minutes=10)):
                 where = items[0][4]().replace("/", "\\")
                 c.add("file_wiped", f"{first_old} was overwritten and deleted",
                       f"{where or first_old} was renamed {len(items)} times to meaningless names within "
@@ -429,6 +762,9 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                 continue
             for ts, old, new, get_path, _ in items:
                 eo, en = extension_of(old), extension_of(new)
+                if old.startswith(("~", "$")) or new.startswith(("~", "$")):
+                    c.dropped["temporary-file renames by Office"] += 1
+                    continue
                 if eo == en or not (eo in OFFICE_EXT or en in OFFICE_EXT):
                     c.dropped["ordinary renames"] += 1
                     continue
@@ -451,7 +787,10 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
     _section(c, "program runs (UserAssist)", userassist)
     _section(c, "installed programs", applications)
     _section(c, "Recycle Bin", recyclebin)
-    _section(c, "opened files (shortcuts)", lnk)
+    _section(c, "opened files (shortcuts)", links)
+    _section(c, "browsed folders (shellbags)", shellbags)
+    _section(c, "Google Drive sync log", gdrive)
+    _section(c, "email (Outlook mailbox)", mail)
     _section(c, "renames and wipes (change journal)", usn)
     for what, count in sorted(c.dropped.items()):
         log(f"{image.label}: left out {count} {what}")

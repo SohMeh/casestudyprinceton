@@ -62,6 +62,50 @@ def _recovered(case, image, dev, out_dir, *, name, path, data, size, created, mo
     )
 
 
+def _office_lock(case, image, dev, *, name: str, path: str, data: bytes, created, siblings: list[str],
+                 source: str, offset, fs: str) -> Finding | None:
+    """Office leaves a tiny lock file next to a document while it is open. Its creation time is when the
+    document was opened, and it names the Office user. Word swaps the first two letters for "~$"."""
+    if not name.startswith("~$") or not 40 <= len(data) <= 256:
+        return None
+    n = data[0]
+    user = data[1: 1 + n].decode("cp1252", "replace").strip() if 0 < n < 54 else ""
+    doc = next((x for x in siblings if not x.startswith("~$") and x[2:].lower() == name[2:].lower()), None)
+    shown = doc or ("??" + name[2:])
+    return Finding(
+        kind="file_opened", agent=AGENT, title=f"{shown} was opened in Office from {image.label}",
+        summary=(f"Office keeps a small lock file next to a document while it is open. The lock file {path} was "
+                 f"created on {image.label}, so {shown} was opened directly from this device"
+                 + (f" by the Office user \"{user}\"" if user else "")
+                 + ". The lock file was deleted when the document closed and has been recovered."),
+        time=_when(case, created), time_source=f"{fs} created time of the Office lock file: when the document was opened",
+        entities=[dev, file_entity(None, shown)],
+        evidence=[Evidence(image=image.name, source=source, path=path, offset=offset, length=len(data),
+                           sha256=sha256(data), detail=f"lock file owner: {user}" if user else None)],
+        confidence=0.9, severity=2, tags=["office-lock", "recovered"],
+        data={"name": shown, "target": path, "user": user, "lock_file": name},
+    )
+
+
+def _fit_layout(pairs: list[tuple[int, int]]) -> tuple[int, int] | None:
+    """Find (base, cluster_size) such that offset = base + cluster_size * cluster for every pair.
+
+    Pairs come from stale directory entries matched to carved files of exactly the same size. When they
+    all fall on one line, the entries belong to an earlier format of the same medium.
+    """
+    pairs = sorted(set(pairs))
+    for (c1, o1), (c2, o2) in zip(pairs, pairs[1:]):
+        if c2 == c1 or (o2 - o1) % (c2 - c1):
+            continue
+        size = (o2 - o1) // (c2 - c1)
+        if size < 512 or size & (size - 1):
+            continue
+        base = o1 - size * c1
+        if sum(1 for c, o in pairs if base + size * c == o) >= max(3, len(pairs) - 1):
+            return base, size
+    return None
+
+
 def _udf_history(case, image, dev, out_dir, fh, vol, s, snaps, findings: list[Finding],
                  taken: list[tuple[int, int]], log: Log) -> None:
     """Replay a write-once disc from its chain of VATs and recover everything it no longer lists."""
@@ -157,6 +201,7 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
     for vol in find_volumes(fh):
         log(f"{image.label}: {vol.fstype} volume at offset {vol.offset}")
         taken: list[tuple[int, int]] = []
+        stale: list = []
         end = vol.offset + vol.size if vol.size else None
         udf_by_offset: dict[int, udf.UdfFile] = {}
 
@@ -172,6 +217,9 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
                 if not data:
                     continue
                 abs_off = vol.offset + v.bpb.cluster_offset(e.start_cluster)
+                if sniff(data) in ("UNKNOWN", "EMPTY"):
+                    stale.append(e)                    # the entry does not describe what is at that place
+                    continue
                 taken.append((abs_off, abs_off + len(data)))
                 findings.append(_recovered(
                     case, image, dev, out_dir, name=e.name, path=e.path, data=data, size=e.size,
@@ -184,13 +232,21 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
         elif vol.fstype == "EXFAT":
             v = exfat.ExFatVolume(SubStream(fh, vol.offset, vol.size))
             n0 = len(findings)
-            for e in v.walk():
+            entries = list(v.walk())
+            for e in entries:
                 if e.is_dir or not e.deleted or e.size == 0 or e.first_cluster < 2:
                     continue
                 data = v.read_data(e.first_cluster, e.size, True)
                 if not data:
                     continue
                 abs_off = vol.offset + v.cluster_offset(e.first_cluster)
+                folder = e.path.rsplit("\\", 1)[0]
+                lock = _office_lock(case, image, dev, name=e.name, path=e.path, data=data, created=e.created,
+                                    siblings=[x.name for x in entries if x.path.rsplit("\\", 1)[0] == folder],
+                                    source="exFAT directory entry set marked deleted", offset=abs_off, fs="exFAT")
+                if lock:
+                    findings.append(lock)
+                    continue
                 taken.append((abs_off, abs_off + len(data)))
                 findings.append(_recovered(
                     case, image, dev, out_dir, name=e.name, path=e.path, data=data, size=e.size,
@@ -243,7 +299,46 @@ def run(case: Case, store: CaseStore, image: ImageRef, log: Log = print) -> list
                     if not e.is_dir and e.size:
                         o = vol.offset + v.bpb.cluster_offset(e.start_cluster)
                         live_ranges.append((o, o + e.size))
-            for c in carve(fh, vol.offset, end, skip=live_ranges):
+            carved = list(carve(fh, vol.offset, end, skip=live_ranges))
+            if stale:
+                by_size = {c.size: c.offset for c in carved}
+                layout = _fit_layout([(e.start_cluster, by_size[e.size]) for e in stale if e.size in by_size])
+                unresolved = []
+                for e in stale:
+                    off = layout[0] + layout[1] * e.start_cluster if layout else None
+                    data = b""
+                    if off is not None and vol.offset <= off < (end or off + 1):
+                        fh.seek(off)
+                        data = fh.read(e.size)
+                    if not data or sniff(data) in ("UNKNOWN", "EMPTY"):
+                        unresolved.append(e)
+                        continue
+                    carved = [c for c in carved if c.offset != off]
+                    findings.append(_recovered(
+                        case, image, dev, out_dir, name=e.name, path=e.path, data=data, size=e.size,
+                        created=e.created, modified=e.modified, fs="FAT",
+                        source=f"FAT directory entry from an earlier format, in unallocated cluster {e.dir_cluster}",
+                        detail=(f"Its directory entry belongs to an earlier format of this medium with "
+                                f"{layout[1] // 1024} KB clusters. The file was read where that layout puts it."),
+                        offset=off, method="fat-previous-layout", deleted_flag=e.deleted))
+                if layout:
+                    log(f"{image.label}: {len(stale) - len(unresolved)} more files recovered through an earlier format "
+                        f"of the medium ({layout[1] // 1024} KB clusters)")
+                for e in unresolved:
+                    findings.append(Finding(
+                        kind="file_deleted", agent=AGENT, title=f"{e.name} was once on {image.label}",
+                        summary=(f"An old directory entry names {e.path} ({human(e.size)}), but the place it points "
+                                 "to no longer holds that file. The name and dates are evidence the file existed. "
+                                 "The content could not be recovered."),
+                        time=_when(case, e.created), time_source="FAT created time in the old directory entry",
+                        entities=[dev, file_entity(None, e.name)],
+                        evidence=[Evidence(image=image.name, source=f"FAT directory entry in unallocated cluster {e.dir_cluster}",
+                                           path=e.path, offset=vol.offset + e.entry_offset, length=32)],
+                        confidence=0.6, severity=1, tags=["name-only", "stale-entry"],
+                        data={"name": e.name, "path": e.path, "size": e.size, "state": "deleted", "method": "fat-stale-entry"},
+                    ))
+            n0 = len(findings)
+            for c in carved:
                 fh.seek(c.offset)
                 data = fh.read(c.size)
                 name = f"carved_{c.offset:010d}.{_EXT.get(c.type, 'bin')}"
