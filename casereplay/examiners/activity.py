@@ -809,15 +809,22 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                     reason = str(rec.Reason).upper()
                     usn_total[0] += 1
                     name = rec.filename or ""
+                    raw = rec.record
+                    ref, up = raw.FileReferenceNumber, raw.ParentFileReferenceNumber
+                    seg = f"{segment_reference(ref)}#{ref.SequenceNumber}"
+                    parent = f"{segment_reference(up)}#{up.SequenceNumber}"
+                    try:                                   # remember every folder the journal names
+                        if int(raw.FileAttributes) & 0x10 and ("FILE_CREATE" in reason or "RENAME_NEW_NAME" in reason):
+                            folders[seg] = (name, parent, up, fs)
+                    except Exception:
+                        pass
                     if not wanted(reason, name):
                         continue
                     try:
                         ts = rec.timestamp
                     except Exception:
                         continue
-                    ref = rec.record.FileReferenceNumber
-                    seg = f"{segment_reference(ref)}#{ref.SequenceNumber}"
-                    yield seg, ts, reason, name, (lambda r=rec: _safe_path(r))
+                    yield seg, ts, reason, name, (lambda r=rec, a=parent, b=up, f=fs, nm=name: _journal_path(r, a, b, f, nm))
             if seen_fs:
                 return
         except Exception as exc:
@@ -831,11 +838,36 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
                 continue
             yield _s(_get(r, "segment_id")), ts, reason, _name(path), (lambda p=path: p)
 
-    def _safe_path(rec) -> str:
+    folders: dict[str, tuple] = {}
+
+    def _journal_path(rec, parent: str, parent_ref, fs, name: str) -> str:
+        """Full path of a journal record. When the folder it was in has since been deleted, the path is
+        rebuilt from the journal's own records of that folder being created."""
         try:
-            return _s(rec.full_path).replace("/", "\\")
+            path = _s(rec.full_path).replace("/", "\\")
         except Exception:
-            return ""
+            path = ""
+        if path and "<broken_reference" not in path:
+            return path
+        parts, seg, ref, depth = [name], parent, parent_ref, 0
+        while seg in folders and depth < 16:
+            folder_name, seg, ref, _ = folders[seg]
+            parts.append(folder_name)
+            depth += 1
+        top = ""
+        try:
+            top = _s(fs.ntfs.mft(ref).full_path()).replace("/", "\\")
+        except Exception:
+            top = ""
+        if not top or "<broken_reference" in top:
+            top = "(a folder that no longer exists)"
+        return top + "\\" + "\\".join(reversed(parts))
+
+    def _scratch(path: str, name: str) -> bool:
+        """Temporary copies Office and the browser make on their own."""
+        low = path.lower()
+        return any(x in low for x in ("\\appdata\\local\\temp\\", "\\temporary internet files\\", "\\content.mso\\",
+                                      "\\microsoft\\templates\\")) or bool(re.match(r"^[0-9A-F]{8}\.\w{3,4}$", name))
 
     usn_total = [0]
 
@@ -865,6 +897,9 @@ def _run_target(case: Case, store: CaseStore, image: ImageRef, log: Log) -> list
         tracked: dict[str, str] = {}                           # segment -> how to describe the file when it is deleted
         for seg, (ts, name, get_path) in created.items():
             where = get_path()
+            if _scratch(where, name):
+                c.dropped["temporary copies made by Office or the browser"] += 1
+                continue
             c.add("file_created", f"{name} appeared on the computer",
                   f"A new file named {name} was created" + (f" in {folder_of(where)}" if folder_of(where) else "")
                   + ". For a document that already exists elsewhere, this is the moment it was copied here.",
